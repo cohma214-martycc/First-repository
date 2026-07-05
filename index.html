@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Blind Navigation - Digging Prototype</title>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; overflow: hidden; background-color: #222; }
+        #game-container { display: flex; flex-direction: column; height: 100%; }
+
+        /* Map Section - Top Half */
+        #map-section { flex: 1; background-color: #5d4037; display: flex; align-items: center; justify-content: center; padding: 10px; }
+        #canvas-map { background-color: #3e2723; border: 4px solid #111; max-height: 100%; max-width: 100%; }
+
+        /* Controls Section - Bottom Half */
+        #controls-section { flex: 1; display: flex; }
+        .btn { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: bold; color: rgba(255,255,255,0.3); user-select: none; }
+        #btn-left { background-color: #4CAF50; border-right: 2px solid #222; }
+        #btn-left:active { background-color: #388E3C; }
+        #btn-right { background-color: #F44336; border-left: 2px solid #222; }
+        #btn-right:active { background-color: #D32F2F; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="map-section">
+        <canvas id="canvas-map" width="300" height="300"></canvas>
+    </div>
+    <div id="controls-section">
+        <div id="btn-left" class="btn" onmousedown="move('left')" ontouchstart="move('left')">LEFT</div>
+        <div id="btn-right" class="btn" onmousedown="move('right')" ontouchstart="move('right')">RIGHT</div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('canvas-map');
+    const ctx = canvas.getContext('2d');
+
+    // 5x5 Grid: 0 = Dirt (Wall), 1 = Tunnel (Path), 2 = Goal
+    const maze = [
+        [0, 2, 0, 0, 0],
+        [0, 1, 0, 0, 0],
+        [0, 1, 1, 1, 0],
+        [0, 0, 0, 1, 0],
+        [0, 1, 1, 1, 0] // Dead end at (1, 4)
+    ];
+
+    const tileSize = canvas.width / 5;
+    let playerPos = { x: 3, y: 4 }; // Start position
+
+    function drawMap() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        for(let y = 0; y < maze.length; y++) {
+            for(let x = 0; x < maze[y].length; x++) {
+                if (maze[y][x] === 0) {
+                    ctx.fillStyle = '#4e342e'; // Solid Dirt
+                    ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+                } else if (maze[y][x] === 1) {
+                    ctx.fillStyle = '#8d6e63'; // Dug Tunnel
+                    ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+                } else if (maze[y][x] === 2) {
+                    ctx.fillStyle = '#ffd54f'; // Spectacular Treasure
+                    ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+                }
+            }
+        }
+
+        // Draw Player (Drill/Miner)
+        ctx.fillStyle = '#2196F3';
+        ctx.beginPath();
+        ctx.arc(playerPos.x * tileSize + tileSize/2, playerPos.y * tileSize + tileSize/2, tileSize/3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    function move(direction) {
+        let newX = playerPos.x;
+        let newY = playerPos.y;
+
+        if (direction === 'left') newX -= 1;
+        if (direction === 'right') newX += 1;
+        // Basic up/down logic needed based on direction faced - simplified for gray-box test
+
+        // Check bounds and walls (0)
+        if (newX >= 0 && newX < 5 && newY >= 0 && newY < 5 && maze[newY][newX] !== 0) {
+            playerPos.x = newX;
+            playerPos.y = newY;
+
+            if (maze[newY][newX] === 2) {
+                alert("You found the treasure!");
+            }
+        } else {
+            // Haptic feedback placeholder for "bounce back"
+            if (navigator.vibrate) navigator.vibrate(200);
+            console.log("Bumped into dirt!");
+        }
+        drawMap();
+    }
+
+    drawMap();
+</script>
+</body>
+</html>
