@@ -14,7 +14,7 @@
 
         /* Controls Section - Bottom Half */
         #controls-section { flex: 1; display: flex; }
-        .btn { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: bold; color: rgba(255,255,255,0.3); user-select: none; }
+        .btn { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: bold; color: rgba(255,255,255,0.3); user-select: none; text-align: center; }
         #btn-left { background-color: #4CAF50; border-right: 2px solid #222; }
         #btn-left:active { background-color: #388E3C; }
         #btn-right { background-color: #F44336; border-left: 2px solid #222; }
@@ -28,8 +28,8 @@
         <canvas id="canvas-map" width="300" height="300"></canvas>
     </div>
     <div id="controls-section">
-        <div id="btn-left" class="btn" onmousedown="move('left')" ontouchstart="move('left')">LEFT</div>
-        <div id="btn-right" class="btn" onmousedown="move('right')" ontouchstart="move('right')">RIGHT</div>
+        <div id="btn-left" class="btn" onmousedown="turn('left')" ontouchstart="event.preventDefault(); turn('left')">TURN LEFT</div>
+        <div id="btn-right" class="btn" onmousedown="turn('right')" ontouchstart="event.preventDefault(); turn('right')">TURN RIGHT</div>
     </div>
 </div>
 
@@ -48,6 +48,8 @@
 
     const tileSize = canvas.width / 5;
     let playerPos = { x: 3, y: 4 }; // Start position
+    let heading = { dx: 0, dy: -1 }; // Drill starts pointing up
+    const TICK_MS = 700; // Drill advances one tile per tick
 
     function drawMap() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -68,35 +70,56 @@
         }
 
         // Draw Player (Drill/Miner)
+        const cx = playerPos.x * tileSize + tileSize/2;
+        const cy = playerPos.y * tileSize + tileSize/2;
         ctx.fillStyle = '#2196F3';
         ctx.beginPath();
-        ctx.arc(playerPos.x * tileSize + tileSize/2, playerPos.y * tileSize + tileSize/2, tileSize/3, 0, Math.PI * 2);
+        ctx.arc(cx, cy, tileSize/3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Drill tip so the navigator can see which way the driver is facing
+        ctx.fillStyle = '#FFEB3B';
+        ctx.beginPath();
+        ctx.arc(cx + heading.dx * tileSize/4, cy + heading.dy * tileSize/4, tileSize/8, 0, Math.PI * 2);
         ctx.fill();
     }
 
-    function move(direction) {
-        let newX = playerPos.x;
-        let newY = playerPos.y;
+    // The driver's two inputs: rotate the drill 90° relative to its heading
+    function turn(direction) {
+        if (direction === 'left')  heading = { dx: heading.dy,  dy: -heading.dx };
+        if (direction === 'right') heading = { dx: -heading.dy, dy: heading.dx };
+        drawMap();
+    }
 
-        if (direction === 'left') newX -= 1;
-        if (direction === 'right') newX += 1;
-        // Basic up/down logic needed based on direction faced - simplified for gray-box test
+    // The drill always digs forward on its own; the driver only steers
+    function tick() {
+        const newX = playerPos.x + heading.dx;
+        const newY = playerPos.y + heading.dy;
 
         // Check bounds and walls (0)
         if (newX >= 0 && newX < 5 && newY >= 0 && newY < 5 && maze[newY][newX] !== 0) {
             playerPos.x = newX;
             playerPos.y = newY;
+            drawMap();
 
             if (maze[newY][newX] === 2) {
+                clearInterval(drillTimer);
                 alert("You found the treasure!");
             }
         } else {
-            // Haptic feedback placeholder for "bounce back"
+            // Stalled against solid dirt — haptic cue for the eyes-closed driver
             if (navigator.vibrate) navigator.vibrate(200);
-            console.log("Bumped into dirt!");
+            console.log("Drill stalled against dirt!");
         }
-        drawMap();
     }
+
+    const drillTimer = setInterval(tick, TICK_MS);
+
+    // Arrow keys for desktop testing
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') turn('left');
+        if (e.key === 'ArrowRight') turn('right');
+    });
 
     drawMap();
 </script>
