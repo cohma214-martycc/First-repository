@@ -35,9 +35,10 @@ markers, or instructions consistent with green=left, red=right.
 - **Haptic feedback and celebratory audio signal progress.** Vibration tells
   the eyes-closed driver they're stalled; success should be audible and
   joyful, not just visual.
-- **The child tracks the player mentally.** The navigator should not simply
-  read a real-time position off the screen — the design intent is that they
-  hold the drill's location in their head.
+- **Only the adult is blind.** The child navigator sees everything in real
+  time — map, drill position, facing, and timer. The challenge is
+  communicating what they see into the driver's frame of reference, not
+  remembering it.
 - **Personal best timer, not a leaderboard.** The pair beats *their own* time
   together; there is no competition between players.
 - **Start simple: a two-turn maze with one deliberate dead end** to force
@@ -52,12 +53,13 @@ markers, or instructions consistent with green=left, red=right.
   direction; `turn('left'|'right')` rotates the heading 90°. Tune pace via
   `TICK_MS` if playtesting shows the navigator can't keep up.
 - A yellow drill-tip dot shows the navigator the current facing.
+- Rounds start (and restart) via a tap on the full-screen overlay; that tap
+  also unlocks the Web Audio context, which browsers require a user gesture
+  for.
+- Timer HUD sits above the map; the personal best persists in
+  `localStorage` under the key `bestTime` (milliseconds).
+- Every game event has both haptic and audio feedback, since the driver
+  can't see and not every phone vibrates: a soft blip per tile advanced, a
+  low thud when stalled, and a rising jingle plus celebration vibration
+  pattern on a win.
 - Arrow keys (left/right) mirror the buttons for desktop testing.
-
-## Known gaps vs. the design
-
-- The map currently shows the player's real-time position, which undercuts
-  the "child tracks the player mentally" principle.
-- No personal best timer yet.
-- Success is a blocking `alert()` — no celebratory audio; stall feedback is
-  vibration only (no audio fallback on devices without `navigator.vibrate`).

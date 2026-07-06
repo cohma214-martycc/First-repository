@@ -9,8 +9,9 @@
         #game-container { display: flex; flex-direction: column; height: 100%; }
 
         /* Map Section - Top Half */
-        #map-section { flex: 1; background-color: #5d4037; display: flex; align-items: center; justify-content: center; padding: 10px; }
+        #map-section { flex: 1; position: relative; background-color: #5d4037; display: flex; align-items: center; justify-content: center; padding: 10px; }
         #canvas-map { background-color: #3e2723; border: 4px solid #111; max-height: 100%; max-width: 100%; }
+        #hud { position: absolute; top: 8px; left: 0; right: 0; text-align: center; color: #ffd54f; font-weight: bold; letter-spacing: 1px; text-shadow: 1px 1px 2px #000; }
 
         /* Controls Section - Bottom Half */
         #controls-section { flex: 1; display: flex; }
@@ -19,12 +20,19 @@
         #btn-left:active { background-color: #388E3C; }
         #btn-right { background-color: #F44336; border-left: 2px solid #222; }
         #btn-right:active { background-color: #D32F2F; }
+
+        /* Start / Win Overlay */
+        #overlay { position: absolute; inset: 0; z-index: 10; background: rgba(0,0,0,0.75); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #fff; text-align: center; user-select: none; }
+        #overlay-title { font-size: 2rem; font-weight: bold; color: #ffd54f; }
+        #overlay-info { font-size: 1rem; color: #ccc; padding: 0 20px; }
+        #overlay-sub { font-size: 1.2rem; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div id="game-container">
     <div id="map-section">
+        <div id="hud"></div>
         <canvas id="canvas-map" width="300" height="300"></canvas>
     </div>
     <div id="controls-section">
@@ -33,9 +41,20 @@
     </div>
 </div>
 
+<div id="overlay" onclick="startRound()" ontouchstart="event.preventDefault(); startRound()">
+    <div id="overlay-title">Blind Digging</div>
+    <div id="overlay-info">Driver: eyes closed, hands on the buttons. Navigator: watch the map and call the turns!</div>
+    <div id="overlay-sub">Tap to start</div>
+</div>
+
 <script>
     const canvas = document.getElementById('canvas-map');
     const ctx = canvas.getContext('2d');
+    const hud = document.getElementById('hud');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlay-title');
+    const overlayInfo = document.getElementById('overlay-info');
+    const overlaySub = document.getElementById('overlay-sub');
 
     // 5x5 Grid: 0 = Dirt (Wall), 1 = Tunnel (Path), 2 = Goal
     const maze = [
@@ -47,9 +66,35 @@
     ];
 
     const tileSize = canvas.width / 5;
-    let playerPos = { x: 3, y: 4 }; // Start position
-    let heading = { dx: 0, dy: -1 }; // Drill starts pointing up
+    const START_POS = { x: 3, y: 4 };
     const TICK_MS = 700; // Drill advances one tile per tick
+    let playerPos = { ...START_POS };
+    let heading = { dx: 0, dy: -1 }; // Drill starts pointing up
+    let drillTimer = null;
+    let hudTimer = null;
+    let startTime = 0;
+    let running = false;
+
+    // --- Audio cues (Web Audio, unlocked by the start tap) ---
+    // The driver plays with eyes closed and not every phone vibrates,
+    // so every game event also has a sound.
+    let audioCtx = null;
+    function playTone(freq, duration, type, volume, delay = 0) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+        gain.gain.value = volume;
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        const t = audioCtx.currentTime + delay;
+        osc.start(t);
+        osc.stop(t + duration);
+    }
+    function soundStep()  { playTone(440, 0.06, 'sine', 0.08); }   // soft blip: still digging
+    function soundStall() { playTone(90, 0.15, 'square', 0.25); }  // low thud: stuck in dirt
+    function soundWin()   { [523, 659, 784, 1047].forEach((f, i) => playTone(f, 0.18, 'triangle', 0.25, i * 0.15)); }
 
     function drawMap() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -86,6 +131,7 @@
 
     // The driver's two inputs: rotate the drill 90° relative to its heading
     function turn(direction) {
+        if (!running) return;
         if (direction === 'left')  heading = { dx: heading.dy,  dy: -heading.dx };
         if (direction === 'right') heading = { dx: -heading.dy, dy: heading.dx };
         drawMap();
@@ -103,17 +149,63 @@
             drawMap();
 
             if (maze[newY][newX] === 2) {
-                clearInterval(drillTimer);
-                alert("You found the treasure!");
+                win();
+            } else {
+                soundStep();
             }
         } else {
-            // Stalled against solid dirt — haptic cue for the eyes-closed driver
+            // Stalled against solid dirt — buzz and thud, no lost progress
             if (navigator.vibrate) navigator.vibrate(200);
-            console.log("Drill stalled against dirt!");
+            soundStall();
         }
     }
 
-    const drillTimer = setInterval(tick, TICK_MS);
+    function formatTime(ms) { return (ms / 1000).toFixed(1) + 's'; }
+
+    function updateHud() {
+        const best = localStorage.getItem('bestTime');
+        const elapsed = running ? Date.now() - startTime : 0;
+        hud.textContent = 'Time: ' + formatTime(elapsed) + '  |  Best: ' + (best ? formatTime(+best) : '—');
+    }
+
+    function startRound() {
+        // The start tap doubles as the user gesture that unlocks audio
+        try {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        } catch (e) { audioCtx = null; }
+
+        playerPos = { ...START_POS };
+        heading = { dx: 0, dy: -1 };
+        overlay.style.display = 'none';
+        running = true;
+        startTime = Date.now();
+        drillTimer = setInterval(tick, TICK_MS);
+        hudTimer = setInterval(updateHud, 100);
+        drawMap();
+        updateHud();
+    }
+
+    function win() {
+        running = false;
+        clearInterval(drillTimer);
+        clearInterval(hudTimer);
+
+        // Personal best to beat together — no leaderboard
+        const elapsed = Date.now() - startTime;
+        const best = localStorage.getItem('bestTime');
+        const isNewBest = !best || elapsed < +best;
+        if (isNewBest) localStorage.setItem('bestTime', elapsed);
+
+        soundWin();
+        if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 300]);
+
+        overlayTitle.textContent = isNewBest ? 'NEW PERSONAL BEST!' : 'Treasure found!';
+        overlayInfo.textContent = 'Time: ' + formatTime(elapsed) + '  |  Best: ' + formatTime(+localStorage.getItem('bestTime'));
+        overlaySub.textContent = 'Tap to dig again';
+        overlay.style.display = 'flex';
+        updateHud();
+    }
 
     // Arrow keys for desktop testing
     document.addEventListener('keydown', (e) => {
@@ -122,6 +214,7 @@
     });
 
     drawMap();
+    updateHud();
 </script>
 </body>
 </html>
