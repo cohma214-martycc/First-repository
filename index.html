@@ -1,220 +1,1150 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Blind Navigation - Digging Prototype</title>
-    <style>
-        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; overflow: hidden; background-color: #222; }
-        #game-container { display: flex; flex-direction: column; height: 100%; }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Tunnels</title>
+<style>
+  :root{
+    --btnH: 22vh;
+    --colour-left: #5E7C4A;
+    --colour-right: #A6423A;
+    --sky: #DCE3DD;
+    --soil-deep: #4A3728;
+    --paper: #F2E8D8;
+    --ink: #33291F;
+  }
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; height:100%;
+    overflow:hidden;
+    background: var(--soil-deep);
+    touch-action:none;
+    -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: -apple-system, ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+  }
+  #world{ position:fixed; top:0; left:0; }
 
-        /* Map Section - Top Half */
-        #map-section { flex: 1; position: relative; background-color: #5d4037; display: flex; align-items: center; justify-content: center; padding: 10px; }
-        #canvas-map { background-color: #3e2723; border: 4px solid #111; max-height: 100%; max-width: 100%; }
-        #hud { position: absolute; top: 8px; left: 0; right: 0; text-align: center; color: #ffd54f; font-weight: bold; letter-spacing: 1px; text-shadow: 1px 1px 2px #000; }
+  /* ---- The only two touch targets during play ---- */
+  #controls{
+    position:fixed; left:0; right:0; bottom:0;
+    height: calc(var(--btnH) + env(safe-area-inset-bottom));
+    display:flex;
+  }
+  #controls button{
+    flex:1 1 50%;
+    border:none; margin:0; padding:0 0 env(safe-area-inset-bottom) 0;
+    font-size: clamp(28px, 8vw, 48px);
+    color: rgba(242,232,216,0.55);
+    transition: filter 80ms;
+    outline:none;
+  }
+  #btnLeft{ background: var(--colour-left); border-top:3px solid rgba(0,0,0,0.15); }
+  #btnRight{ background: var(--colour-right); border-top:3px solid rgba(0,0,0,0.15); }
+  #controls button.held{ filter: brightness(1.25); }
 
-        /* Controls Section - Bottom Half */
-        #controls-section { flex: 1; display: flex; }
-        .btn { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: bold; color: rgba(255,255,255,0.3); user-select: none; text-align: center; }
-        #btn-left { background-color: #4CAF50; border-right: 2px solid #222; }
-        #btn-left:active { background-color: #388E3C; }
-        #btn-right { background-color: #F44336; border-left: 2px solid #222; }
-        #btn-right:active { background-color: #D32F2F; }
+  /* ---- HUD (words are for the Navigator — short, friendly) ---- */
+  #hud{
+    position:fixed; top:0; left:0; right:0;
+    display:flex; justify-content:space-between; align-items:baseline;
+    padding: max(8px, env(safe-area-inset-top)) 14px 0 14px;
+    font-size:15px; font-weight:700; letter-spacing:0.02em;
+    pointer-events:none;
+  }
+  #hud .dim{ opacity:0.75; font-weight:600; }
 
-        /* Start / Win Overlay */
-        #overlay { position: absolute; inset: 0; z-index: 10; background: rgba(0,0,0,0.75); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #fff; text-align: center; user-select: none; }
-        #overlay-title { font-size: 2rem; font-weight: bold; color: #ffd54f; }
-        #overlay-info { font-size: 1rem; color: #ccc; padding: 0 20px; }
-        #overlay-sub { font-size: 1.2rem; margin-top: 10px; }
-    </style>
+  /* ---- Panels & banner ---- */
+  .card{
+    position:fixed; left:50%; transform:translateX(-50%);
+    background: var(--paper); color: var(--ink);
+    border-radius:18px; padding:16px 20px;
+    max-width: 340px; width: calc(100% - 48px);
+    box-shadow: 0 4px 0 rgba(0,0,0,0.18);
+    text-align:center; pointer-events:none;
+  }
+  #panel{ bottom: calc(var(--btnH) + env(safe-area-inset-bottom) + 18px); display:none; }
+  #panel h1{ margin:0 0 6px 0; font-size:26px; font-weight:800; }
+  #panel p{ margin:4px 0; font-size:16px; line-height:1.35; }
+  #panel .hint{ font-size:13px; opacity:0.7; margin-top:10px; }
+  #panel .badge{
+    display:inline-block; background:#B23A48; color:var(--paper);
+    border-radius:999px; padding:3px 12px; font-size:14px; font-weight:800;
+    margin:4px 3px 0 3px;
+  }
+  #panel .vocab{ font-size:14px; margin-top:8px; }
+  #panel .vocab b.g{ color:#5E7C4A; } #panel .vocab b.r{ color:#A6423A; }
+  #panel .dim{ opacity:0.7; font-size:13px; }
+
+  #banner{
+    position:fixed; top:34%; left:0; right:0; display:none;
+    text-align:center; font-size: clamp(34px, 10vw, 56px);
+    font-weight:800; color: var(--paper);
+    text-shadow: 0 3px 0 rgba(0,0,0,0.35);
+    pointer-events:none;
+  }
+  #go{
+    position:fixed; top:38%; left:0; right:0; display:none;
+    text-align:center; font-size: clamp(48px, 16vw, 90px);
+    font-weight:800; color: var(--paper);
+    text-shadow: 0 3px 0 rgba(0,0,0,0.35);
+    pointer-events:none;
+  }
+
+  /* ---- Dev panel (tap the sky 5 times) ---- */
+  #dev{
+    position:fixed; inset: 24px 16px calc(var(--btnH) + 24px) 16px;
+    background: var(--paper); color:var(--ink); border-radius:14px;
+    padding:14px; overflow:auto; display:none; z-index:50;
+    font-size:13px;
+  }
+  #dev h2{ margin:0 0 8px 0; font-size:17px; }
+  #dev .row{ display:flex; justify-content:space-between; align-items:center; margin:3px 0; gap:8px; }
+  #dev .row label{ flex:1; }
+  #dev input[type=text], #dev input[type=number]{ width:130px; padding:2px 6px; font-size:13px; }
+  #dev .btns{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  #dev button{ padding:7px 12px; border-radius:8px; border:1px solid #999; background:#fff; font-size:13px; }
+  #dev textarea{ width:100%; height:70px; margin-top:8px; font-size:11px; }
+
+  @media (prefers-reduced-motion: reduce){
+    #controls button{ transition:none; }
+  }
+</style>
 </head>
 <body>
-
-<div id="game-container">
-    <div id="map-section">
-        <div id="hud"></div>
-        <canvas id="canvas-map" width="300" height="300"></canvas>
-    </div>
-    <div id="controls-section">
-        <div id="btn-left" class="btn" onmousedown="turn('left')" ontouchstart="event.preventDefault(); turn('left')">TURN LEFT</div>
-        <div id="btn-right" class="btn" onmousedown="turn('right')" ontouchstart="event.preventDefault(); turn('right')">TURN RIGHT</div>
-    </div>
+<canvas id="world"></canvas>
+<div id="hud">
+  <span id="hudStage"></span>
+  <span id="hudBumps" class="dim"></span>
+  <span id="hudTime"></span>
 </div>
-
-<div id="overlay" onclick="startRound()" ontouchstart="event.preventDefault(); startRound()">
-    <div id="overlay-title">Blind Digging</div>
-    <div id="overlay-info">Driver: eyes closed, hands on the buttons. Navigator: watch the map and call the turns!</div>
-    <div id="overlay-sub">Tap to start</div>
+<div id="panel" class="card"></div>
+<div id="banner">OPEN YOUR EYES!</div>
+<div id="go">Go!</div>
+<div id="dev"></div>
+<div id="controls">
+  <button id="btnLeft" aria-label="Left — green">&#9664;</button>
+  <button id="btnRight" aria-label="Right — red">&#9654;</button>
 </div>
 
 <script>
-    const canvas = document.getElementById('canvas-map');
-    const ctx = canvas.getContext('2d');
-    const hud = document.getElementById('hud');
-    const overlay = document.getElementById('overlay');
-    const overlayTitle = document.getElementById('overlay-title');
-    const overlayInfo = document.getElementById('overlay-info');
-    const overlaySub = document.getElementById('overlay-sub');
+'use strict';
+/* =========================================================================
+   TUNNELS — v1 "Prove the ritual"
+   Two players, one phone. Driver (eyes closed) has exactly two buttons:
+   LEFT = GREEN, RIGHT = RED. Navigator (eyes open) steers by voice.
+   See CLAUDE.md for the full spec. Two buttons only, forever.
+   ========================================================================= */
 
-    // 5x5 Grid: 0 = Dirt (Wall), 1 = Tunnel (Path), 2 = Goal
-    const maze = [
-        [0, 2, 0, 0, 0],
-        [0, 1, 0, 0, 0],
-        [0, 1, 1, 1, 0],
-        [0, 0, 0, 1, 0],
-        [0, 1, 1, 1, 0] // Dead end at (1, 4)
-    ];
+/* ---------------- CONFIG — every feel-affecting number lives here -------- */
+const CONFIG_DEFAULTS = {
+  // movement
+  digSpeed: 1.0,            // tiles per second between junctions
+  junctionPauseMs: 0,       // 0 = wait forever (v1 default); >0 = timed window
+  bumpBouncePx: 24,         // comedy bounce distance
+  bumpStunMs: 900,          // pause after bump before re-offering the junction
+  // maze generation (v2+ — unused by v1 hand-authored stages)
+  stageJunctions: [2, 4, 6],
+  stageDeadEnds: [1, 2, 3],
+  mazeCols: 9, mazeRows: 12,
+  gemCount: 2, gemDeadEndBias: 0.7,
+  // difficulty ramp (v2+)
+  streakDifficultyStep: 3,
+  streakDifficultyCap: 14,
+  // controls & accessibility
+  colourLeft: '#5E7C4A', colourRight: '#A6423A',
+  buttonHeightPct: 22,
+  hapticsEnabled: true, audioVolume: 0.8,
+  // navigator information
+  showLiveDigger: true,
+  positionUpdateAtJunctionsOnly: false,
+  // feel & pacing (v1)
+  bounceSpeedMult: 2.5,     // how fast the digger slides back after a bump
+  junctionRecueMs: 5000,    // gentle "still waiting" cue for the eyes-closed Driver
+  countdownMs: 800,
+  bannerMs: 2200,
+  shakeMs: 450,
+  // debug
+  debugOverlay: false,
+  seedOverride: null,
+};
 
-    const tileSize = canvas.width / 5;
-    const START_POS = { x: 3, y: 4 };
-    const TICK_MS = 700; // Drill advances one tile per tick
-    let playerPos = { ...START_POS };
-    let heading = { dx: 0, dy: -1 }; // Drill starts pointing up
-    let drillTimer = null;
-    let hudTimer = null;
-    let startTime = 0;
-    let running = false;
+const LS = {
+  get(key, fallback){ try{ const v = localStorage.getItem('tunnels:'+key); return v===null? fallback : JSON.parse(v); }catch(e){ return fallback; } },
+  set(key, val){ try{ localStorage.setItem('tunnels:'+key, JSON.stringify(val)); }catch(e){} },
+};
 
-    // --- Audio cues (Web Audio, unlocked by the start tap) ---
-    // The driver plays with eyes closed and not every phone vibrates,
-    // so every game event also has a sound.
-    let audioCtx = null;
-    function playTone(freq, duration, type, volume, delay = 0) {
-        if (!audioCtx) return;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = type;
-        osc.frequency.value = freq;
-        gain.gain.value = volume;
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        const t = audioCtx.currentTime + delay;
-        osc.start(t);
-        osc.stop(t + duration);
+const CONFIG = Object.assign({}, CONFIG_DEFAULTS, LS.get('config', {}));
+// URL params override everything: index.html?digSpeed=1.4&debugOverlay=true
+(function applyUrlOverrides(){
+  const q = new URLSearchParams(location.search);
+  for(const key of Object.keys(CONFIG_DEFAULTS)){
+    if(!q.has(key)) continue;
+    const raw = q.get(key);
+    if(raw==='true') CONFIG[key]=true;
+    else if(raw==='false') CONFIG[key]=false;
+    else if(raw==='null') CONFIG[key]=null;
+    else if(raw.startsWith('[')){ try{ CONFIG[key]=JSON.parse(raw); }catch(e){} }
+    else if(raw!=='' && !isNaN(Number(raw))) CONFIG[key]=Number(raw);
+    else CONFIG[key]=raw;
+  }
+})();
+
+/* ---------------- Palette — picture-book earth tones --------------------- */
+const PAL = {
+  soilDeep: '#4A3728',
+  soilWarm: '#6B4F35',
+  tunnel:   '#C9A876',
+  sky:      '#DCE3DD',
+  gem:      '#B23A48',   // the one saturated accent — path trace on the reveal
+  paper:    '#F2E8D8',
+  ink:      '#33291F',
+  rock:     '#3E2E21',
+  root:     '#54402C',
+  hat:      '#C9A034',
+  skin:     '#D9B48F',
+  overalls: '#5C6B78',
+  spade:    '#8A8378',
+};
+
+/* ---------------- Hand-authored v1 stages --------------------------------
+   '#' = soil, '.' = tunnel corridor, 'S' = start (dig down), 'E' = breakthrough.
+   Every junction is a T (left/right choice); corners auto-turn.            */
+const STAGES = [
+  { name:'Stage 1', rows:[
+    '####S##E#',
+    '####.##.#',
+    '####.##.#',
+    '##....#.#',
+    '##.###..#',
+    '##.###.##',
+    '##.....##',
+    '######.##',
+    '######.##',
+    '#########',
+  ]},
+  { name:'Stage 2', rows:[
+    '##S######',
+    '##.######',
+    '##.######',
+    '#......##',
+    '######.##',
+    '###.##.##',
+    '###....##',
+    '###.#####',
+    '###....##',
+    '######.##',
+    '####....#',
+    '####E####',
+  ]},
+  { name:'Stage 3', rows:[
+    '######S##',
+    '######.##',
+    '######.##',
+    '##......#',
+    '##.######',
+    '##.######',
+    '#.....###',
+    '#####.###',
+    '###....##',
+    '###.##.##',
+    '###.##.##',
+    '####....#',
+    '####E####',
+  ]},
+];
+
+/* ---------------- Tiny seeded PRNG for decorative dirt ------------------- */
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------------- Audio — synthesised, unlocked by the ready press ------- */
+const AudioFX = (function(){
+  let actx = null;
+  function unlock(){
+    if(!actx){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(AC) actx = new AC();
     }
-    function soundStep()  { playTone(440, 0.06, 'sine', 0.08); }   // soft blip: still digging
-    function soundStall() { playTone(90, 0.15, 'square', 0.25); }  // low thud: stuck in dirt
-    function soundWin()   { [523, 659, 784, 1047].forEach((f, i) => playTone(f, 0.18, 'triangle', 0.25, i * 0.15)); }
+    if(actx && actx.state === 'suspended') actx.resume();
+  }
+  function tone(freq, durMs, opts){
+    if(!actx) return;
+    opts = opts || {};
+    const t0 = actx.currentTime + (opts.delayMs||0)/1000;
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = opts.type || 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    if(opts.slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(30, opts.slideTo), t0 + durMs/1000);
+    const vol = (opts.vol!==undefined? opts.vol : 0.25) * CONFIG.audioVolume;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, vol), t0 + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durMs/1000);
+    osc.connect(gain); gain.connect(actx.destination);
+    osc.start(t0); osc.stop(t0 + durMs/1000 + 0.05);
+  }
+  return {
+    unlock,
+    digBlip(){ tone(620, 55, {type:'sine', vol:0.06}); },
+    junctionCue(){ // a soft questioning "hm?"
+      tone(330, 110, {type:'triangle', vol:0.16});
+      tone(415, 150, {type:'triangle', vol:0.16, delayMs:130});
+    },
+    bump(){ // thud…
+      tone(95, 160, {type:'sine', vol:0.5, slideTo:55});
+      // …boing
+      tone(190, 260, {type:'triangle', vol:0.22, slideTo:430, delayMs:90});
+      tone(430, 200, {type:'triangle', vol:0.16, slideTo:150, delayMs:330});
+    },
+    fanfare(){
+      const notes = [523, 659, 784, 1047];
+      notes.forEach((f,i)=> tone(f, 220, {type:'triangle', vol:0.28, delayMs:i*130}));
+      tone(1047, 480, {type:'sine', vol:0.2, delayMs:notes.length*130});
+    },
+    chime(){ tone(880, 200, {type:'sine', vol:0.14}); tone(1175, 260, {type:'sine', vol:0.12, delayMs:90}); },
+  };
+})();
 
-    function drawMap() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+function buzz(pattern){
+  if(CONFIG.hapticsEnabled && navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} }
+}
 
-        for(let y = 0; y < maze.length; y++) {
-            for(let x = 0; x < maze[y].length; x++) {
-                if (maze[y][x] === 0) {
-                    ctx.fillStyle = '#4e342e'; // Solid Dirt
-                    ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
-                } else if (maze[y][x] === 1) {
-                    ctx.fillStyle = '#8d6e63'; // Dug Tunnel
-                    ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
-                } else if (maze[y][x] === 2) {
-                    ctx.fillStyle = '#ffd54f'; // Spectacular Treasure
-                    ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
-                }
-            }
-        }
+/* ---------------- Wake lock — the screen must never sleep mid-stage ------ */
+let wakeLock = null;
+async function keepAwake(){
+  try{
+    if('wakeLock' in navigator){ wakeLock = await navigator.wakeLock.request('screen'); }
+  }catch(e){ /* degrade silently */ }
+}
+function releaseWake(){ if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; } }
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible' && PLAY_PHASES.has(G.phase)) keepAwake();
+});
 
-        // Draw Player (Drill/Miner)
-        const cx = playerPos.x * tileSize + tileSize/2;
-        const cy = playerPos.y * tileSize + tileSize/2;
-        ctx.fillStyle = '#2196F3';
-        ctx.beginPath();
-        ctx.arc(cx, cy, tileSize/3, 0, Math.PI * 2);
-        ctx.fill();
+/* ---------------- Direction helpers --------------------------------------
+   Headings are screen vectors. The Driver's left/right are relative to the
+   digger's facing — heading down means "left" is the screen's right. That
+   frame-of-reference flip is the whole cooperative challenge; keep it.     */
+const DIRS = { up:{dx:0,dy:-1}, down:{dx:0,dy:1}, left:{dx:-1,dy:0}, right:{dx:1,dy:0} };
+function turnLeft(h){ return {dx:h.dy, dy:-h.dx}; }
+function turnRight(h){ return {dx:-h.dy, dy:h.dx}; }
+function headingAngle(h){ return Math.atan2(h.dy, h.dx); }
 
-        // Drill tip so the navigator can see which way the driver is facing
-        ctx.fillStyle = '#FFEB3B';
-        ctx.beginPath();
-        ctx.arc(cx + heading.dx * tileSize/4, cy + heading.dy * tileSize/4, tileSize/8, 0, Math.PI * 2);
-        ctx.fill();
+/* ---------------- Maze parsing ------------------------------------------- */
+function parseStage(stage){
+  const grid = stage.rows.map(r=>r.split(''));
+  let start=null, exit=null;
+  grid.forEach((row,r)=> row.forEach((ch,c)=>{
+    if(ch==='S') start={c,r};
+    if(ch==='E') exit={c,r};
+  }));
+  return {
+    name: stage.name,
+    grid,
+    cols: grid[0].length,
+    rowsN: grid.length,
+    start, exit,
+    isOpen(c,r){
+      if(r<0||c<0||r>=grid.length||c>=grid[0].length) return false;
+      return grid[r][c] !== '#';
+    },
+  };
+}
+
+/* ---------------- Game state --------------------------------------------- */
+const PLAY_PHASES = new Set(['digging','junction','stunned','bouncing']);
+const G = {
+  phase: 'briefing',   // briefing | countdown | digging | junction | stunned | bouncing | breakthrough | reveal | runComplete
+  stageIdx: 0,
+  maze: null,
+  cell: null,          // current grid cell {c,r}
+  heading: DIRS.down,
+  moveFrom: null, moveTo: null, moveT: 0,
+  dug: new Set(),      // 'c,r' strings
+  trace: [],           // every cell visited, in order (for the reveal ink line)
+  sinceJunction: [],   // cells since the last junction — the bounce-back path
+  lastJunction: null,  // {cell, heading}
+  bumps: [],           // {c,r} per stage — becomes reveal stars
+  stageMs: 0,
+  stageTimes: [], stageBumpCounts: [],
+  countdownT: 0, bannerT: 0, stunT: 0, stunAfter: null,
+  bouncePath: null, bounceIdx: 0, bounceT: 0,
+  junctionWaitMs: 0, recueMs: 0,
+  shakeT: 0, helmetSlip: false,
+  particles: [],
+  bothArmed: true,     // require full release between both-press triggers
+  totals(){ return {
+    time: this.stageTimes.reduce((a,b)=>a+b,0),
+    bumps: this.stageBumpCounts.reduce((a,b)=>a+b,0),
+  }; },
+};
+
+/* ---------------- Layout & canvas ---------------------------------------- */
+const canvas = document.getElementById('world');
+const ctx = canvas.getContext('2d');
+let W=0, H=0, DPR=1, cs=0, ox=0, oy=0, skyH=0;
+let staticLayer = null;
+
+function layout(){
+  if(!G.maze) return;
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  const btnH = Math.round(window.innerHeight * CONFIG.buttonHeightPct/100);
+  document.documentElement.style.setProperty('--btnH', btnH+'px');
+  W = window.innerWidth;
+  H = window.innerHeight - btnH;
+  canvas.width = Math.round(W*DPR);
+  canvas.height = Math.round(H*DPR);
+  canvas.style.width = W+'px';
+  canvas.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  skyH = Math.max(44, Math.round(H*0.12));
+  cs = Math.floor(Math.min(W/G.maze.cols, (H-skyH)/G.maze.rowsN));
+  ox = Math.round((W - cs*G.maze.cols)/2);
+  oy = skyH;
+  buildStaticLayer();
+}
+window.addEventListener('resize', layout);
+if(window.visualViewport) window.visualViewport.addEventListener('resize', layout);
+
+function cellCenter(c,r){ return { x: ox + c*cs + cs/2, y: oy + r*cs + cs/2 }; }
+
+/* ---------------- Static layer: sky, soil, undug maze, decorative dirt --- */
+function buildStaticLayer(){
+  const m = G.maze;
+  staticLayer = document.createElement('canvas');
+  staticLayer.width = canvas.width; staticLayer.height = canvas.height;
+  const s = staticLayer.getContext('2d');
+  s.setTransform(DPR,0,0,DPR,0,0);
+  const rnd = mulberry32((G.stageIdx+1)*7919);
+
+  // sky strip — quiet, pale, a thin picture-book world above
+  s.fillStyle = PAL.sky; s.fillRect(0,0,W,skyH);
+  drawSkyScene(s, rnd);
+
+  // soil
+  s.fillStyle = PAL.soilDeep; s.fillRect(0,skyH,W,H-skyH);
+  // surface line
+  s.strokeStyle = PAL.ink; s.globalAlpha = 0.35; s.lineWidth = 1;
+  s.beginPath(); s.moveTo(0, skyH+0.5); s.lineTo(W, skyH+0.5); s.stroke();
+  s.globalAlpha = 1;
+
+  // undug corridors — the map the Navigator reads (mid earth, slightly lighter)
+  s.fillStyle = PAL.soilWarm;
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(m.isOpen(c,r)) s.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
+  }
+
+  // rocks: soft blobs a shade darker, in solid soil
+  s.fillStyle = PAL.rock;
+  for(let r=1;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(!m.isOpen(c,r) && rnd()<0.13){
+      const px = ox+c*cs+cs*(0.25+rnd()*0.5), py = oy+r*cs+cs*(0.25+rnd()*0.5);
+      const rw = cs*(0.16+rnd()*0.16), rh = rw*(0.6+rnd()*0.5);
+      s.beginPath(); s.ellipse(px,py,rw,rh, rnd()*Math.PI, 0, Math.PI*2); s.fill();
     }
+  }
 
-    // The driver's two inputs: rotate the drill 90° relative to its heading
-    function turn(direction) {
-        if (!running) return;
-        if (direction === 'left')  heading = { dx: heading.dy,  dy: -heading.dx };
-        if (direction === 'right') heading = { dx: -heading.dy, dy: heading.dx };
-        drawMap();
+  // roots dangling from the surface
+  s.strokeStyle = PAL.root; s.lineWidth = Math.max(1, cs*0.045); s.lineCap='round';
+  for(let c=0;c<m.cols;c++){
+    if(!m.isOpen(c,0) && rnd()<0.55){
+      let x = ox+c*cs+cs*(0.3+rnd()*0.4), y = oy;
+      s.beginPath(); s.moveTo(x,y);
+      const segs = 2+Math.floor(rnd()*3);
+      for(let i=0;i<segs;i++){ x += (rnd()-0.5)*cs*0.5; y += cs*(0.35+rnd()*0.4); s.lineTo(x,y); }
+      s.stroke();
     }
+  }
 
-    // The drill always digs forward on its own; the driver only steers
-    function tick() {
-        const newX = playerPos.x + heading.dx;
-        const newY = playerPos.y + heading.dy;
+  // buried oddities — silent jokes, decorative only
+  const odd = ['bone','boot','teacup'];
+  const spots = [];
+  let guard = 0;
+  while(spots.length<2 && guard++<200){
+    const c = 1+Math.floor(rnd()*(m.cols-2)), r = 2+Math.floor(rnd()*(m.rowsN-3));
+    if(!m.isOpen(c,r) && !spots.some(sp=>sp.c===c&&sp.r===r)) spots.push({c,r,kind:odd[Math.floor(rnd()*odd.length)]});
+  }
+  s.globalAlpha = 0.45;
+  spots.forEach(sp=> drawOddity(s, ox+sp.c*cs+cs/2, oy+sp.r*cs+cs/2, cs*0.55, sp.kind));
+  s.globalAlpha = 1;
 
-        // Check bounds and walls (0)
-        if (newX >= 0 && newX < 5 && newY >= 0 && newY < 5 && maze[newY][newX] !== 0) {
-            playerPos.x = newX;
-            playerPos.y = newY;
-            drawMap();
+  // very subtle paper grain
+  s.globalAlpha = 0.05;
+  for(let i=0;i<W*H/160;i++){
+    s.fillStyle = rnd()<0.5? '#000':'#fff';
+    s.fillRect(rnd()*W, rnd()*H, 1, 1);
+  }
+  s.globalAlpha = 1;
+}
 
-            if (maze[newY][newX] === 2) {
-                win();
-            } else {
-                soundStep();
-            }
-        } else {
-            // Stalled against solid dirt — buzz and thud, no lost progress
-            if (navigator.vibrate) navigator.vibrate(200);
-            soundStall();
-        }
-    }
+function drawSkyScene(s, rnd){
+  const gy = skyH; // ground line
+  // little house
+  const hw = Math.min(46, skyH*0.9), hx = W*0.16, hh = hw*0.62;
+  s.fillStyle = '#B9AA96'; s.fillRect(hx, gy-hh, hw, hh);
+  s.fillStyle = '#8C7B66';
+  s.beginPath(); s.moveTo(hx-4, gy-hh); s.lineTo(hx+hw/2, gy-hh-hw*0.42); s.lineTo(hx+hw+4, gy-hh); s.closePath(); s.fill();
+  s.fillStyle = PAL.ink; s.globalAlpha=0.5;
+  s.fillRect(hx+hw*0.4, gy-hh*0.55, hw*0.2, hh*0.55); // door
+  s.globalAlpha=1;
+  // bare tree
+  const tx = W*0.78, th = skyH*0.72;
+  s.strokeStyle = '#7A6A55'; s.lineWidth = 3; s.lineCap='round';
+  s.beginPath(); s.moveTo(tx, gy); s.lineTo(tx, gy-th); s.stroke();
+  s.lineWidth = 2;
+  s.beginPath(); s.moveTo(tx, gy-th*0.55); s.lineTo(tx-th*0.35, gy-th*0.85); s.stroke();
+  s.beginPath(); s.moveTo(tx, gy-th*0.7); s.lineTo(tx+th*0.3, gy-th*0.95); s.stroke();
+  s.beginPath(); s.moveTo(tx, gy-th*0.4); s.lineTo(tx+th*0.25, gy-th*0.55); s.stroke();
+  // washing line with little clothes
+  const lx1 = hx+hw, ly1 = gy-hh*0.8, lx2 = tx-4, ly2 = gy-th*0.6;
+  s.strokeStyle = PAL.ink; s.globalAlpha=0.35; s.lineWidth=1;
+  s.beginPath(); s.moveTo(lx1,ly1); s.quadraticCurveTo((lx1+lx2)/2, Math.max(ly1,ly2)+8, lx2, ly2); s.stroke();
+  s.globalAlpha=0.6;
+  const cols = ['#A6423A','#5E7C4A','#B9AA96'];
+  for(let i=1;i<=3;i++){
+    const t=i/4, x=lx1+(lx2-lx1)*t, y=ly1+(ly2-ly1)*t + Math.sin(Math.PI*t)*7;
+    s.fillStyle = cols[i-1]; s.fillRect(x-4, y, 8, 9);
+  }
+  s.globalAlpha=1;
+}
 
-    function formatTime(ms) { return (ms / 1000).toFixed(1) + 's'; }
-
-    function updateHud() {
-        const best = localStorage.getItem('bestTime');
-        const elapsed = running ? Date.now() - startTime : 0;
-        hud.textContent = 'Time: ' + formatTime(elapsed) + '  |  Best: ' + (best ? formatTime(+best) : '—');
-    }
-
-    function startRound() {
-        // The start tap doubles as the user gesture that unlocks audio
-        try {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-        } catch (e) { audioCtx = null; }
-
-        playerPos = { ...START_POS };
-        heading = { dx: 0, dy: -1 };
-        overlay.style.display = 'none';
-        running = true;
-        startTime = Date.now();
-        drillTimer = setInterval(tick, TICK_MS);
-        hudTimer = setInterval(updateHud, 100);
-        drawMap();
-        updateHud();
-    }
-
-    function win() {
-        running = false;
-        clearInterval(drillTimer);
-        clearInterval(hudTimer);
-
-        // Personal best to beat together — no leaderboard
-        const elapsed = Date.now() - startTime;
-        const best = localStorage.getItem('bestTime');
-        const isNewBest = !best || elapsed < +best;
-        if (isNewBest) localStorage.setItem('bestTime', elapsed);
-
-        soundWin();
-        if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 300]);
-
-        overlayTitle.textContent = isNewBest ? 'NEW PERSONAL BEST!' : 'Treasure found!';
-        overlayInfo.textContent = 'Time: ' + formatTime(elapsed) + '  |  Best: ' + formatTime(+localStorage.getItem('bestTime'));
-        overlaySub.textContent = 'Tap to dig again';
-        overlay.style.display = 'flex';
-        updateHud();
-    }
-
-    // Arrow keys for desktop testing
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowLeft') turn('left');
-        if (e.key === 'ArrowRight') turn('right');
+function drawOddity(s, x, y, sz, kind){
+  s.fillStyle = '#5C4835';
+  if(kind==='bone'){
+    s.fillRect(x-sz*0.3, y-sz*0.07, sz*0.6, sz*0.14);
+    [[-0.3,-0.1],[-0.3,0.1],[0.3,-0.1],[0.3,0.1]].forEach(([ax,ay])=>{
+      s.beginPath(); s.arc(x+ax*sz, y+ay*sz, sz*0.1, 0, Math.PI*2); s.fill();
     });
+  }else if(kind==='boot'){
+    s.fillRect(x-sz*0.15, y-sz*0.3, sz*0.28, sz*0.45);
+    s.fillRect(x-sz*0.15, y+0.05*sz, sz*0.5, sz*0.16);
+  }else{ // teacup
+    s.beginPath(); s.arc(x, y, sz*0.24, 0, Math.PI, false); s.fill();
+    s.fillRect(x-sz*0.24, y-sz*0.06, sz*0.48, sz*0.08);
+    s.strokeStyle = '#5C4835'; s.lineWidth=2;
+    s.beginPath(); s.arc(x+sz*0.3, y+sz*0.08, sz*0.1, -Math.PI/2, Math.PI/2); s.stroke();
+  }
+}
 
-    drawMap();
-    updateHud();
+/* ---------------- Stage lifecycle ---------------------------------------- */
+function key(cell){ return cell.c+','+cell.r; }
+
+function setupStage(idx){
+  G.stageIdx = idx;
+  G.maze = parseStage(STAGES[idx]);
+  G.cell = {...G.maze.start};
+  G.heading = DIRS.down;
+  G.moveFrom = null; G.moveTo = null; G.moveT = 0;
+  G.dug = new Set([key(G.cell)]);
+  G.trace = [{...G.cell}];
+  G.sinceJunction = [{...G.cell}];
+  G.lastJunction = null;
+  G.bumps = [];
+  G.stageMs = 0;
+  G.helmetSlip = false;
+  G.particles = [];
+  G.phase = 'briefing';
+  layout();
+  showBriefing();
+}
+
+function startStage(){
+  AudioFX.unlock();
+  keepAwake();
+  hidePanel();
+  G.phase = 'countdown';
+  G.countdownT = CONFIG.countdownMs;
+  document.getElementById('go').style.display = 'block';
+  AudioFX.chime();
+}
+
+function beginMove(){
+  G.moveFrom = {...G.cell};
+  G.moveTo = { c: G.cell.c + G.heading.dx, r: G.cell.r + G.heading.dy };
+  G.moveT = 0;
+  G.phase = 'digging';
+}
+
+function arriveAt(cell){
+  G.cell = cell;
+  G.dug.add(key(cell));
+  G.trace.push({...cell});
+  G.sinceJunction.push({...cell});
+  AudioFX.digBlip();
+  buzz(12);
+
+  const m = G.maze;
+  if(cell.c===m.exit.c && cell.r===m.exit.r){ breakthrough(); return; }
+
+  const ahead = G.heading, left = turnLeft(G.heading), right = turnRight(G.heading);
+  const options = [ahead, left, right].filter(d=> m.isOpen(cell.c+d.dx, cell.r+d.dy));
+
+  if(options.length===0){ deadEndBump(); }
+  else if(options.length===1){ G.heading = options[0]; beginMove(); } // corners auto-turn
+  else{ enterJunction(); }
+}
+
+function enterJunction(){
+  G.phase = 'junction';
+  G.lastJunction = { cell:{...G.cell}, heading:{...G.heading} };
+  G.sinceJunction = [{...G.cell}];
+  G.junctionWaitMs = 0; G.recueMs = 0;
+  AudioFX.junctionCue();
+  buzz(30);
+}
+
+function chooseAtJunction(side){ // side: 'left' | 'right'
+  const dir = side==='left'? turnLeft(G.heading) : turnRight(G.heading);
+  if(G.maze.isOpen(G.cell.c+dir.dx, G.cell.r+dir.dy)){
+    G.heading = dir;
+    beginMove();
+  }else{
+    inPlaceBump();
+  }
+}
+
+function goStraightAtJunction(){ // only reachable when junctionPauseMs > 0
+  if(G.maze.isOpen(G.cell.c+G.heading.dx, G.cell.r+G.heading.dy)) beginMove();
+  else inPlaceBump();
+}
+
+/* Bumps are comedy, never failure. */
+function bumpFX(){
+  AudioFX.bump();
+  buzz([200,80,160]);
+  G.shakeT = CONFIG.shakeMs;
+  G.helmetSlip = true;
+  dustPuff();
+}
+
+function deadEndBump(){
+  G.bumps.push({...G.cell});
+  bumpFX();
+  G.phase = 'stunned';
+  G.stunT = CONFIG.bumpStunMs;
+  G.stunAfter = 'bounce';
+}
+
+function inPlaceBump(){
+  G.bumps.push({...G.cell});
+  bumpFX();
+  G.phase = 'stunned';
+  G.stunT = CONFIG.bumpStunMs;
+  G.stunAfter = 'junction';
+}
+
+function startBounce(){
+  // slide back along the dug corridor to the last junction
+  G.bouncePath = G.sinceJunction.slice().reverse();
+  G.bounceIdx = 0; G.bounceT = 0;
+  G.phase = 'bouncing';
+}
+
+function endBounce(){
+  const j = G.lastJunction;
+  G.cell = {...j.cell};
+  G.heading = {...j.heading};
+  G.helmetSlip = false;
+  G.trace.push({...G.cell});
+  enterJunction();
+}
+
+function breakthrough(){
+  G.phase = 'breakthrough';
+  G.bannerT = CONFIG.bannerMs;
+  AudioFX.fanfare();
+  buzz([80,40,80,40,220]);
+  breakthroughParticles();
+  document.getElementById('banner').style.display = 'block';
+}
+
+function showReveal(){
+  document.getElementById('banner').style.display = 'none';
+  G.phase = 'reveal';
+  G.stageTimes.push(G.stageMs);
+  G.stageBumpCounts.push(G.bumps.length);
+  showPanel(
+    '<h1>You made it!</h1>'+
+    '<p>Time '+fmtTime(G.stageMs)+' &middot; Bumps '+G.bumps.length+' &#9733;</p>'+
+    (G.stageIdx<2
+      ? '<p class="hint">Hold both buttons together for the next stage</p>'
+      : '<p class="hint">Hold both buttons together to finish the run</p>')
+  );
+  AudioFX.chime();
+}
+
+function finishRun(){
+  const tot = G.totals();
+  const best = LS.get('best', {fastestMs:null, fewestBumps:null});
+  const badges = [];
+  if(best.fastestMs===null || tot.time < best.fastestMs){ best.fastestMs = tot.time; badges.push('Fastest run yet!'); }
+  if(best.fewestBumps===null || tot.bumps < best.fewestBumps){ best.fewestBumps = tot.bumps; badges.push('Smoothest run yet!'); }
+  LS.set('best', best);
+  const runs = (LS.get('runs', 0)) + 1;
+  LS.set('runs', runs);
+  releaseWake();
+  G.phase = 'runComplete';
+  showPanel(
+    '<h1>You made it!</h1>'+
+    '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' bumps &#9733;</p>'+
+    (badges.length? badges.map(x=>'<span class="badge">'+x+'</span>').join('') : '')+
+    '<p class="dim">Best: '+fmtTime(best.fastestMs)+' &middot; smoothest '+best.fewestBumps+' bumps<br>Runs together: '+runs+'</p>'+
+    '<p class="hint">Hold both buttons together to dig again</p>'
+  );
+}
+
+function nextAfterReveal(){
+  if(G.stageIdx < 2){ setupStage(G.stageIdx+1); }
+  else{ finishRun(); }
+}
+
+function newRun(){
+  G.stageTimes = []; G.stageBumpCounts = [];
+  setupStage(0);
+}
+
+/* ---------------- Particles ---------------------------------------------- */
+const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function diggerXY(){
+  let p;
+  if(G.phase==='digging' && G.moveTo){
+    const a = cellCenter(G.moveFrom.c, G.moveFrom.r), b = cellCenter(G.moveTo.c, G.moveTo.r);
+    p = { x: a.x+(b.x-a.x)*G.moveT, y: a.y+(b.y-a.y)*G.moveT };
+  }else if(G.phase==='bouncing' && G.bouncePath && G.bouncePath.length>1){
+    const i = Math.min(G.bounceIdx, G.bouncePath.length-2);
+    const a = cellCenter(G.bouncePath[i].c, G.bouncePath[i].r);
+    const b = cellCenter(G.bouncePath[i+1].c, G.bouncePath[i+1].r);
+    p = { x: a.x+(b.x-a.x)*G.bounceT, y: a.y+(b.y-a.y)*G.bounceT };
+  }else{
+    p = cellCenter(G.cell.c, G.cell.r);
+  }
+  if(G.phase==='stunned' && G.stunAfter==='bounce'){
+    // comedy recoil away from the wall it just hit
+    const k = CONFIG.bumpBouncePx * (G.stunT/CONFIG.bumpStunMs);
+    p = { x: p.x - G.heading.dx*k, y: p.y - G.heading.dy*k };
+  }
+  return p;
+}
+
+function dustPuff(){
+  if(reducedMotion) return;
+  const p = diggerXY();
+  for(let i=0;i<12;i++){
+    const a = Math.random()*Math.PI*2, sp = 20+Math.random()*60;
+    G.particles.push({ x:p.x+G.heading.dx*cs*0.4, y:p.y+G.heading.dy*cs*0.4,
+      vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-30, life:0.5+Math.random()*0.3,
+      size:cs*(0.08+Math.random()*0.1), color:PAL.soilWarm });
+  }
+}
+
+function breakthroughParticles(){
+  const p = cellCenter(G.maze.exit.c, G.maze.exit.r);
+  const n = reducedMotion? 6 : 26;
+  for(let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2, sp = 40+Math.random()*140;
+    G.particles.push({ x:p.x, y:p.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-80,
+      life:0.7+Math.random()*0.6, size:cs*(0.1+Math.random()*0.18),
+      color: Math.random()<0.5? PAL.soilWarm : PAL.tunnel });
+  }
+}
+
+/* ---------------- Update loop -------------------------------------------- */
+let lastT = performance.now();
+function update(dt){
+  // stage clock runs only while actually underground
+  if(PLAY_PHASES.has(G.phase)) G.stageMs += dt;
+
+  if(G.phase==='countdown'){
+    G.countdownT -= dt;
+    if(G.countdownT<=0){
+      document.getElementById('go').style.display = 'none';
+      beginMove();
+    }
+  }
+  else if(G.phase==='digging'){
+    G.moveT += dt/1000 * CONFIG.digSpeed;
+    if(G.moveT>=1){ arriveAt({...G.moveTo}); }
+  }
+  else if(G.phase==='junction'){
+    G.recueMs += dt;
+    if(G.recueMs >= CONFIG.junctionRecueMs){ G.recueMs = 0; AudioFX.junctionCue(); buzz(20); }
+    if(CONFIG.junctionPauseMs > 0){
+      G.junctionWaitMs += dt;
+      if(G.junctionWaitMs >= CONFIG.junctionPauseMs){ G.junctionWaitMs = 0; goStraightAtJunction(); }
+    }
+  }
+  else if(G.phase==='stunned'){
+    G.stunT -= dt;
+    if(G.stunT<=0){
+      if(G.stunAfter==='bounce') startBounce();
+      else{ G.helmetSlip = false; G.phase = 'junction'; G.recueMs = 0; AudioFX.junctionCue(); }
+    }
+  }
+  else if(G.phase==='bouncing'){
+    G.bounceT += dt/1000 * CONFIG.digSpeed * CONFIG.bounceSpeedMult;
+    while(G.bounceT>=1 && G.phase==='bouncing'){
+      G.bounceT -= 1; G.bounceIdx++;
+      if(G.bounceIdx >= G.bouncePath.length-1){ endBounce(); }
+    }
+  }
+  else if(G.phase==='breakthrough'){
+    G.bannerT -= dt;
+    if(G.bannerT<=0) showReveal();
+  }
+
+  if(G.shakeT>0) G.shakeT -= dt;
+
+  // particles
+  for(let i=G.particles.length-1;i>=0;i--){
+    const p = G.particles[i];
+    p.life -= dt/1000;
+    if(p.life<=0){ G.particles.splice(i,1); continue; }
+    p.vy += 260*dt/1000;
+    p.x += p.vx*dt/1000; p.y += p.vy*dt/1000;
+  }
+}
+
+/* ---------------- Render -------------------------------------------------- */
+function render(now){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+
+  if(G.shakeT>0 && !reducedMotion){
+    const amp = 5 * (G.shakeT/CONFIG.shakeMs);
+    ctx.translate((Math.random()-0.5)*2*amp, (Math.random()-0.5)*2*amp);
+  }
+
+  if(staticLayer) ctx.drawImage(staticLayer, 0, 0, W, H);
+
+  // dug tunnel — visibly lighter, like exposed dry dirt
+  ctx.fillStyle = PAL.tunnel;
+  G.dug.forEach(k=>{
+    const [c,r] = k.split(',').map(Number);
+    ctx.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
+  });
+
+  drawExitMarker(now);
+
+  if(G.phase==='reveal' || G.phase==='runComplete') drawPathTrace();
+
+  if(CONFIG.showLiveDigger || !PLAY_PHASES.has(G.phase)){
+    if(G.phase==='briefing' || G.phase==='countdown'){
+      const s0 = cellCenter(G.maze.start.c, G.maze.start.r);
+      drawDigger(s0.x, oy - cs*0.42, 0, now);   // waiting on the surface
+    }else{
+      const p = diggerXY();
+      drawDigger(p.x, p.y, headingAngle(G.heading), now);
+    }
+  }
+
+  // particles
+  G.particles.forEach(p=>{
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life*2));
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x-p.size/2, p.y-p.size/2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+
+  if(CONFIG.debugOverlay) drawDebug();
+}
+
+function drawExitMarker(now){
+  const e = cellCenter(G.maze.exit.c, G.maze.exit.r);
+  const pulse = reducedMotion? 0.25 : 0.18 + 0.12*Math.sin(now/400);
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = PAL.paper;
+  ctx.beginPath(); ctx.arc(e.x, e.y, cs*0.55, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 0.9;
+  drawStar(e.x, e.y, cs*0.2, PAL.paper);
+  ctx.globalAlpha = 1;
+}
+
+function wob(i){ // deterministic hand-inked wobble for the reveal line
+  const x = Math.sin(i*127.1)*43758.5453;
+  return (x - Math.floor(x) - 0.5) * cs*0.22;
+}
+
+function drawPathTrace(){
+  if(G.trace.length<2) return;
+  ctx.strokeStyle = PAL.gem;
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = Math.max(2, cs*0.14);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath();
+  G.trace.forEach((cell,i)=>{
+    const p = cellCenter(cell.c, cell.r);
+    const x = p.x + wob(i), y = p.y + wob(i+911);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  // a little star for every thud — the laugh-together markers
+  G.bumps.forEach(b=>{
+    const p = cellCenter(b.c, b.r);
+    drawStar(p.x, p.y, cs*0.28, PAL.paper, PAL.ink);
+  });
+}
+
+function drawStar(x, y, r, fill, stroke){
+  ctx.save();
+  ctx.beginPath();
+  for(let i=0;i<10;i++){
+    const ang = -Math.PI/2 + i*Math.PI/5;
+    const rad = i%2===0? r : r*0.45;
+    const px = x+Math.cos(ang)*rad, py = y+Math.sin(ang)*rad;
+    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+  if(stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+  ctx.restore();
+}
+
+function drawDigger(x, y, ang, now){
+  const s = cs*0.62;
+  const digging = G.phase==='digging';
+  const bob = (!reducedMotion && digging)? Math.sin(now/70)*s*0.05 : 0;
+  const jab = (!reducedMotion && digging)? Math.sin(now/60)*s*0.08 : 0;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(ang);
+  ctx.translate(0, bob);
+  // spade out front
+  ctx.fillStyle = PAL.spade;
+  ctx.fillRect(s*0.28+jab, -s*0.05, s*0.34, s*0.1);
+  ctx.beginPath();
+  ctx.moveTo(s*0.62+jab, -s*0.16); ctx.lineTo(s*0.88+jab, 0); ctx.lineTo(s*0.62+jab, s*0.16);
+  ctx.closePath(); ctx.fill();
+  // legs
+  ctx.strokeStyle = PAL.overalls; ctx.lineWidth = Math.max(2, s*0.14); ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-s*0.22, s*0.12); ctx.lineTo(-s*0.32, s*0.4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-s*0.02, s*0.12); ctx.lineTo(-s*0.06, s*0.42); ctx.stroke();
+  // body (overalls)
+  ctx.fillStyle = PAL.overalls;
+  roundedRect(-s*0.42, -s*0.22, s*0.55, s*0.44, s*0.16);
+  // head
+  ctx.fillStyle = PAL.skin;
+  ctx.beginPath(); ctx.arc(s*0.2, -s*0.16, s*0.2, 0, Math.PI*2); ctx.fill();
+  // deadpan dot eye — hidden when the helmet slips over it
+  const slip = G.helmetSlip? s*0.16 : 0;
+  if(!G.helmetSlip){
+    ctx.fillStyle = PAL.ink;
+    ctx.beginPath(); ctx.arc(s*0.28, -s*0.18, s*0.035, 0, Math.PI*2); ctx.fill();
+  }
+  // hard hat
+  ctx.fillStyle = PAL.hat;
+  ctx.beginPath(); ctx.arc(s*0.2 + slip*0.6, -s*0.24 + slip*0.5, s*0.2, Math.PI, 0); ctx.fill();
+  ctx.fillRect(s*0.2 - s*0.26 + slip*0.6, -s*0.26 + slip*0.5, s*0.52, s*0.06);
+  ctx.restore();
+}
+
+function roundedRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath(); ctx.fill();
+}
+
+function drawDebug(){
+  const m = G.maze;
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 0.5;
+  for(let r=0;r<=m.rowsN;r++){ ctx.beginPath(); ctx.moveTo(ox, oy+r*cs); ctx.lineTo(ox+m.cols*cs, oy+r*cs); ctx.stroke(); }
+  for(let c=0;c<=m.cols;c++){ ctx.beginPath(); ctx.moveTo(ox+c*cs, oy); ctx.lineTo(ox+c*cs, oy+m.rowsN*cs); ctx.stroke(); }
+  ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
+  ctx.fillText('phase: '+G.phase+'  cell: '+key(G.cell)+'  hdg: '+G.heading.dx+','+G.heading.dy, 8, H-8);
+}
+
+/* ---------------- HUD & panels ------------------------------------------- */
+function fmtTime(ms){
+  if(ms===null || ms===undefined) return '–';
+  const s = Math.floor(ms/1000);
+  return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+}
+function updateHUD(){
+  const inPlay = PLAY_PHASES.has(G.phase) || G.phase==='countdown';
+  document.getElementById('hudStage').textContent = STAGES[G.stageIdx].name+' of 3';
+  document.getElementById('hudTime').textContent = (inPlay || G.phase==='breakthrough')? fmtTime(G.stageMs) : '';
+  document.getElementById('hudBumps').textContent = (inPlay && G.bumps.length)? '★ '+G.bumps.length : '';
+}
+
+const panelEl = document.getElementById('panel');
+function showPanel(html){ panelEl.innerHTML = html; panelEl.style.display = 'block'; }
+function hidePanel(){ panelEl.style.display = 'none'; }
+function showBriefing(){
+  showPanel(
+    '<h1>'+STAGES[G.stageIdx].name+' of 3</h1>'+
+    '<p>Make a plan together!</p>'+
+    '<p class="vocab"><b class="g">Green</b> is left &middot; <b class="r">Red</b> is right</p>'+
+    '<p class="hint">Driver: eyes closed? Hold both buttons to start</p>'
+  );
+}
+
+/* ---------------- Input — two buttons only, forever ----------------------- */
+const btnLeft = document.getElementById('btnLeft');
+const btnRight = document.getElementById('btnRight');
+let leftHeld = false, rightHeld = false;
+
+function press(side){
+  AudioFX.unlock();
+  if(G.phase==='junction') chooseAtJunction(side);
+  // presses mid-corridor or mid-stun are silently ignored — the digger digs on
+}
+
+function bothPressCheck(){
+  if(!(leftHeld && rightHeld)) return;
+  if(!G.bothArmed) return;
+  G.bothArmed = false;
+  if(G.phase==='briefing') startStage();
+  else if(G.phase==='reveal') nextAfterReveal();
+  else if(G.phase==='runComplete') newRun();
+}
+
+function bindButton(el, side){
+  el.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    el.classList.add('held');
+    if(side==='left') leftHeld = true; else rightHeld = true;
+    press(side);
+    bothPressCheck();
+  });
+  const up = ()=>{
+    el.classList.remove('held');
+    if(side==='left') leftHeld = false; else rightHeld = false;
+    if(!leftHeld && !rightHeld) G.bothArmed = true;
+  };
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+  el.addEventListener('pointerleave', up);
+  el.addEventListener('contextmenu', e=> e.preventDefault());
+}
+bindButton(btnLeft, 'left');
+bindButton(btnRight, 'right');
+
+// Accidental exits are catastrophic mid-stage: swallow touches outside the buttons.
+document.addEventListener('touchstart', e=>{
+  if(!e.target.closest('#controls button') && !e.target.closest('#dev')) e.preventDefault();
+}, {passive:false});
+document.addEventListener('gesturestart', e=> e.preventDefault());
+
+// Arrow keys mirror the buttons for desktop testing; Enter = both-press.
+window.addEventListener('keydown', e=>{
+  if(e.repeat) return;
+  if(e.key==='ArrowLeft'){ leftHeld = true; press('left'); bothPressCheck(); }
+  else if(e.key==='ArrowRight'){ rightHeld = true; press('right'); bothPressCheck(); }
+  else if(e.key==='Enter' || e.key===' '){
+    leftHeld = true; rightHeld = true; bothPressCheck();
+    leftHeld = false; rightHeld = false; G.bothArmed = true;
+  }
+});
+window.addEventListener('keyup', e=>{
+  if(e.key==='ArrowLeft') leftHeld = false;
+  if(e.key==='ArrowRight') rightHeld = false;
+  if(!leftHeld && !rightHeld) G.bothArmed = true;
+});
+
+/* ---------------- Dev panel — tap the sky 5 times ------------------------- */
+let skyTaps = [], devOpen = false;
+canvas.addEventListener('pointerdown', e=>{
+  if(PLAY_PHASES.has(G.phase) || G.phase==='countdown') return; // no extra targets during play
+  if(e.clientY > skyH) return;
+  const now = performance.now();
+  skyTaps = skyTaps.filter(t=> now-t < 2500);
+  skyTaps.push(now);
+  if(skyTaps.length>=5){ skyTaps = []; toggleDev(); }
+});
+
+const devEl = document.getElementById('dev');
+function toggleDev(){
+  devOpen = !devOpen;
+  devEl.style.display = devOpen? 'block':'none';
+  if(devOpen) buildDevPanel();
+}
+function buildDevPanel(){
+  let html = '<h2>Tunnels — tuning panel</h2>';
+  for(const k of Object.keys(CONFIG_DEFAULTS)){
+    const v = CONFIG[k];
+    if(typeof CONFIG_DEFAULTS[k]==='boolean'){
+      html += '<div class="row"><label>'+k+'</label><input type="checkbox" id="cfg-'+k+'" '+(v?'checked':'')+'></div>';
+    }else if(typeof CONFIG_DEFAULTS[k]==='number'){
+      html += '<div class="row"><label>'+k+'</label><input type="number" step="any" id="cfg-'+k+'" value="'+v+'"></div>';
+    }else{
+      const txt = (v===null||v===undefined)? '' : (typeof v==='string'? v : JSON.stringify(v));
+      html += '<div class="row"><label>'+k+'</label><input type="text" id="cfg-'+k+'" value="'+txt.replace(/"/g,'&quot;')+'"></div>';
+    }
+  }
+  html += '<div class="btns">'+
+    '<button id="devSave">Save &amp; apply</button>'+
+    '<button id="devReset">Reset to defaults</button>'+
+    '<button id="devExport">Export config as JSON</button>'+
+    '<button id="devClose">Close</button></div>'+
+    '<textarea id="devOut" readonly placeholder="Exported JSON appears here"></textarea>';
+  devEl.innerHTML = html;
+  document.getElementById('devSave').onclick = ()=>{
+    for(const k of Object.keys(CONFIG_DEFAULTS)){
+      const el = document.getElementById('cfg-'+k);
+      const def = CONFIG_DEFAULTS[k];
+      if(typeof def==='boolean') CONFIG[k] = el.checked;
+      else if(typeof def==='number') CONFIG[k] = Number(el.value);
+      else{
+        const raw = el.value.trim();
+        if(raw==='') CONFIG[k] = null;
+        else if(raw.startsWith('[')||raw.startsWith('{')){ try{ CONFIG[k]=JSON.parse(raw); }catch(err){} }
+        else CONFIG[k] = raw;
+      }
+    }
+    LS.set('config', CONFIG);
+    applyConfigCosmetics();
+    layout();
+  };
+  document.getElementById('devReset').onclick = ()=>{
+    Object.assign(CONFIG, CONFIG_DEFAULTS);
+    try{ localStorage.removeItem('tunnels:config'); }catch(err){}
+    applyConfigCosmetics();
+    layout();
+    buildDevPanel();
+  };
+  document.getElementById('devExport').onclick = ()=>{
+    const json = JSON.stringify(CONFIG, null, 2);
+    document.getElementById('devOut').value = json;
+    if(navigator.clipboard) navigator.clipboard.writeText(json).catch(()=>{});
+  };
+  document.getElementById('devClose').onclick = toggleDev;
+}
+
+function applyConfigCosmetics(){
+  document.documentElement.style.setProperty('--colour-left', CONFIG.colourLeft);
+  document.documentElement.style.setProperty('--colour-right', CONFIG.colourRight);
+}
+
+/* ---------------- Boot ---------------------------------------------------- */
+applyConfigCosmetics();
+setupStage(0);
+
+function frame(now){
+  const dt = Math.min(100, now - lastT);
+  lastT = now;
+  update(dt);
+  render(now);
+  updateHUD();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// exposed for the tuning panel & automated tests
+window.TUNNELS = { G, CONFIG, STAGES, setupStage };
 </script>
 </body>
 </html>

@@ -160,7 +160,7 @@ Rule: **no magic numbers in gameplay code** — if it affects feel, it goes in C
 
 ## 8. Technical Constraints
 
-- Single self-contained `tunnels.html` — inline CSS/JS, no build step, no external network calls. Canvas rendering for the world; DOM for buttons and panels.
+- Single self-contained `index.html` — inline CSS/JS, no build step, no external network calls. Canvas rendering for the world; DOM for buttons and panels.
 - Target: iPhone Safari, portrait, one-handed-thumbs ergonomics. Must run offline once loaded.
 - Persistence: `localStorage` only (journal, bests, streak, config). Namespace keys `tunnels:*`.
 - Audio: Web Audio API, synthesised or tiny embedded sounds — must work after a user gesture (the ready-signal press unlocks audio).
