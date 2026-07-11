@@ -141,15 +141,20 @@
 /* ---------------- CONFIG — every feel-affecting number lives here -------- */
 const CONFIG_DEFAULTS = {
   // movement
-  digSpeed: 1.0,            // tiles per second between junctions
+  digSpeed: 1.0,            // tiles per second between junctions (World One)
+  walkSpeed: 0.8,           // tiles per second (World Two, v2.5 — tortoise-slow is the joke)
   junctionPauseMs: 0,       // 0 = wait forever (v1 default); >0 = timed window
   bumpBouncePx: 24,         // comedy bounce distance
-  bumpStunMs: 900,          // pause after bump before re-offering the junction
+  bumpStunMs: 900,          // pause after bump/bonk before re-offering the junction
   // maze generation (v2+ — unused by v1 hand-authored stages)
   stageJunctions: [2, 4, 6],
   stageDeadEnds: [1, 2, 3],
   mazeCols: 9, mazeRows: 12,
   gemCount: 2, gemDeadEndBias: 0.7,
+  // overworld generation (v2.5+)
+  landmarkCount: 4,         // nameable landmarks per Hat stage
+  landmarkJunctionRadius: 1,// every junction within this many tiles of a landmark
+  hatUnlockRuns: 5,         // completed tunnel runs before World Two appears
   // difficulty ramp (v2+)
   streakDifficultyStep: 3,
   streakDifficultyCap: 14,
@@ -158,13 +163,20 @@ const CONFIG_DEFAULTS = {
   buttonHeightPct: 22,
   chordWindowMs: 250,       // grace period for the both-buttons straight-on chord
   hapticsEnabled: true, audioVolume: 0.8,
+  pressAckEnabled: true,    // immediate tick+haptic on any accepted junction press (v1.1)
+  hapticSigLeft: [20],      // press-down signature: green = one pulse (v1.1)
+  hapticSigRight: [20, 60, 20], // red = two pulses (v1.1)
   // companions & silent jokes
   showDog: true, dogLagTiles: 0.85,   // how far behind the digger the dog trots
-  showCat: true,            // roof cat, stage 2 onward
+  showCat: true,            // roof cat, stage 2 onward (World One)
+  showLizard: true,         // sunning lizard (World Two, v2.5)
   treasureCount: 3,         // decorative gem/gold spots per stage (never collectible)
+  buriedSecondHat: true,    // World Two's silent joke (v2.5, never collectible)
   // navigator information
   showLiveDigger: true,
   positionUpdateAtJunctionsOnly: false,
+  planTraceEnabled: true,   // briefing finger-trace + plan-vs-actual reveal (v2)
+  lineOfSight: false,       // Watcher sees only what's visible from the rock (v3, World Two)
   // feel & pacing (v1)
   bounceSpeedMult: 2.5,     // how fast the digger slides back after a bump
   junctionRecueMs: 5000,    // gentle "still waiting" cue for the eyes-closed Driver
@@ -319,6 +331,7 @@ const AudioFX = (function(){
       tone(190, 260, {type:'triangle', vol:0.22, slideTo:430, delayMs:90});
       tone(430, 200, {type:'triangle', vol:0.16, slideTo:150, delayMs:330});
     },
+    ack(){ tone(880, 45, {type:'sine', vol:0.14}); }, // "heard you" — not "correct"
     fanfare(){
       const notes = [523, 659, 784, 1047];
       notes.forEach((f,i)=> tone(f, 220, {type:'triangle', vol:0.28, delayMs:i*130}));
@@ -341,7 +354,9 @@ async function keepAwake(){
 }
 function releaseWake(){ if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock = null; } }
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState==='visible' && PLAY_PHASES.has(G.phase)) keepAwake();
+  // v1.1: re-request in ALL non-terminal phases — a slow chat over the
+  // briefing map must never dim the screen either
+  if(document.visibilityState==='visible' && G.phase!=='runComplete') keepAwake();
 });
 
 /* ---------------- Direction helpers --------------------------------------
@@ -625,6 +640,7 @@ function setupStage(idx){
   G.particles = [];
   G.phase = 'briefing';
   layout();
+  keepAwake(); // v1.1: from the briefing on, the screen never sleeps
   showBriefing();
 }
 
@@ -675,8 +691,18 @@ function enterJunction(){
   buzz(30);
 }
 
+/* v1.1 press acknowledgement: an eyes-closed Driver must never wonder
+   whether the game heard them. Fires on ANY accepted junction press —
+   including ones about to bump. It confirms "heard you", not "correct". */
+function ackPress(){
+  if(!CONFIG.pressAckEnabled) return;
+  AudioFX.ack();
+  buzz(25);
+}
+
 function chooseAtJunction(side){ // side: 'left' | 'right' — SCREEN directions
   G.pendingSide = null;
+  ackPress();
   const dir = side==='left'? DIRS.left : DIRS.right;
   const isReverse = (dir.dx === -G.heading.dx && dir.dy === -G.heading.dy);
   if(!isReverse && G.maze.isOpen(G.cell.c+dir.dx, G.cell.r+dir.dy)){
@@ -687,8 +713,9 @@ function chooseAtJunction(side){ // side: 'left' | 'right' — SCREEN directions
   }
 }
 
-function chooseStraight(){ // the both-buttons chord (and timed-window default)
+function chooseStraight(fromPress){ // the both-buttons chord (and timed-window default)
   G.pendingSide = null;
+  if(fromPress) ackPress();
   if(G.maze.isOpen(G.cell.c+G.heading.dx, G.cell.r+G.heading.dy)) beginMove();
   else inPlaceBump();
 }
@@ -862,7 +889,7 @@ function update(dt){
     }
     if(CONFIG.junctionPauseMs > 0){
       G.junctionWaitMs += dt;
-      if(G.junctionWaitMs >= CONFIG.junctionPauseMs){ G.junctionWaitMs = 0; chooseStraight(); }
+      if(G.junctionWaitMs >= CONFIG.junctionPauseMs){ G.junctionWaitMs = 0; chooseStraight(false); }
     }
   }
   else if(G.phase==='stunned'){
@@ -1284,11 +1311,16 @@ function updateHUD(){
 const panelEl = document.getElementById('panel');
 function showPanel(html){ panelEl.innerHTML = html; panelEl.style.display = 'block'; }
 function hidePanel(){ panelEl.style.display = 'none'; }
+let dndNudgeShown = false; // once per session, quietly (v1.1)
 function showBriefing(){
+  const dnd = dndNudgeShown? '' :
+    '<p class="hint">Tip: turn on Do Not Disturb &mdash; the Driver can\'t see notifications coming</p>';
+  dndNudgeShown = true;
   showPanel(
     '<h1>'+STAGES[G.stageIdx].name+' of 3</h1>'+
     '<p>Make a plan together!</p>'+
-    '<p class="vocab"><b class="g">Green</b> is left &middot; <b class="r">Red</b> is right<br>Both together is straight on</p>'+
+    '<p class="vocab"><b class="g">Green</b> is left &middot; <b class="r">Red</b> is right<br>Both together is straight on (&ldquo;keep going!&rdquo;)</p>'+
+    dnd+
     '<p class="hint">Driver: eyes closed? Hold both buttons to start</p>'
   );
 }
@@ -1303,7 +1335,7 @@ function press(side){
   if(G.phase!=='junction') return; // mid-corridor presses are silently ignored
   if(G.pendingSide && G.pendingSide!==side){
     // second button landed inside the grace window — that's the chord
-    chooseStraight();
+    chooseStraight(true);
   }else if(!G.pendingSide){
     G.pendingSide = side; G.pendingMs = 0;
   }
@@ -1322,6 +1354,9 @@ function bindButton(el, side){
   el.addEventListener('pointerdown', e=>{
     e.preventDefault();
     el.classList.add('held');
+    // v1.1 per-button signature: green = one pulse, red = two — the Driver
+    // verifies her grip by feel, eyes shut
+    buzz(side==='left'? CONFIG.hapticSigLeft : CONFIG.hapticSigRight);
     if(side==='left') leftHeld = true; else rightHeld = true;
     press(side);
     bothPressCheck();
@@ -1351,7 +1386,7 @@ window.addEventListener('keydown', e=>{
   if(e.key==='ArrowLeft'){ leftHeld = true; press('left'); bothPressCheck(); }
   else if(e.key==='ArrowRight'){ rightHeld = true; press('right'); bothPressCheck(); }
   else if(e.key==='Enter' || e.key===' ' || e.key==='ArrowDown'){
-    if(G.phase==='junction'){ chooseStraight(); return; }
+    if(G.phase==='junction'){ chooseStraight(true); return; }
     leftHeld = true; rightHeld = true; bothPressCheck();
     leftHeld = false; rightHeld = false; G.bothArmed = true;
   }
