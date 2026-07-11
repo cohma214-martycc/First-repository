@@ -156,7 +156,10 @@ const CONFIG_DEFAULTS = {
   // controls & accessibility
   colourLeft: '#5E7C4A', colourRight: '#A6423A',
   buttonHeightPct: 22,
+  chordWindowMs: 250,       // grace period for the both-buttons straight-on chord
   hapticsEnabled: true, audioVolume: 0.8,
+  // companions
+  showDog: true, dogLagTiles: 0.85,   // how far behind the digger the dog trots
   // navigator information
   showLiveDigger: true,
   positionUpdateAtJunctionsOnly: false,
@@ -211,47 +214,55 @@ const PAL = {
 
 /* ---------------- Hand-authored v1 stages --------------------------------
    '#' = soil, '.' = tunnel corridor, 'S' = start (dig down), 'E' = breakthrough.
-   Every junction is a T (left/right choice); corners auto-turn.            */
+   Screen-direction invariant: junctions occur only on vertical runs, so the
+   answer is always green (screen-left), red (screen-right) or the chord
+   (straight on). Horizontal corridors contain corners only.
+   Ramp: 2 junctions → 4 (chords appear) → 6 (chords + tempting shaft).     */
 const STAGES = [
-  { name:'Stage 1', rows:[
-    '####S##E#',
-    '####.##.#',
-    '####.##.#',
-    '##....#.#',
-    '##.###..#',
-    '##.###.##',
+  { name:'Stage 1', rows:[   // green, red — pure side-to-side T's
+    '####S####',
+    '####.####',
+    '####.####',
     '##.....##',
-    '######.##',
-    '######.##',
-    '#########',
-  ]},
-  { name:'Stage 2', rows:[
-    '##S######',
     '##.######',
     '##.######',
-    '#......##',
-    '######.##',
-    '###.##.##',
-    '###....##',
-    '###.#####',
-    '###....##',
-    '######.##',
-    '####....#',
-    '####E####',
+    '#.......#',
+    '#######.#',
+    '#######.#',
+    '#######E#',
   ]},
-  { name:'Stage 3', rows:[
+  { name:'Stage 2', rows:[   // green, both, red, both — chords appear
     '######S##',
     '######.##',
     '######.##',
     '##......#',
     '##.######',
+    '##....###',
     '##.######',
+    '##.....##',
+    '######.##',
+    '###.....#',
+    '#######..',
+    '#######.#',
+    '#######E#',
+  ]},
+  { name:'Stage 3', rows:[   // green, both, red, green, both, red — deepest,
+    '####S####',              // with a tempting dead-end shaft at the 4th junction
+    '####.####',
+    '####.####',
+    '#......##',
+    '#.#######',
+    '#..######',
+    '#.#######',
+    '#...#####',
+    '###.#####',
     '#.....###',
     '#####.###',
-    '###....##',
-    '###.##.##',
-    '###.##.##',
-    '####....#',
+    '##....###',
+    '##.##.###',
+    '##..#.###',
+    '##.######',
+    '#....####',
     '####E####',
   ]},
 ];
@@ -332,13 +343,13 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 /* ---------------- Direction helpers --------------------------------------
-   Headings are screen vectors. The Driver's left/right are relative to the
-   digger's facing — heading down means "left" is the screen's right. That
-   frame-of-reference flip is the whole cooperative challenge; keep it.     */
+   All directions are SCREEN directions — exactly what the Navigator sees.
+   GREEN digs toward the screen's left, RED toward the screen's right, and
+   the two-button chord digs straight on. Never digger-relative: a small
+   Navigator must never have to mentally rotate.                            */
 const DIRS = { up:{dx:0,dy:-1}, down:{dx:0,dy:1}, left:{dx:-1,dy:0}, right:{dx:1,dy:0} };
-function turnLeft(h){ return {dx:h.dy, dy:-h.dx}; }
-function turnRight(h){ return {dx:-h.dy, dy:h.dx}; }
-function headingAngle(h){ return Math.atan2(h.dy, h.dx); }
+function turnLeft(h){ return {dx:h.dy, dy:-h.dx}; }   // geometric helpers for
+function turnRight(h){ return {dx:-h.dy, dy:h.dx}; }  // junction detection only
 
 /* ---------------- Maze parsing ------------------------------------------- */
 function parseStage(stage){
@@ -380,7 +391,11 @@ const G = {
   countdownT: 0, bannerT: 0, stunT: 0, stunAfter: null,
   bouncePath: null, bounceIdx: 0, bounceT: 0,
   junctionWaitMs: 0, recueMs: 0,
+  pendingSide: null, pendingMs: 0,  // chord grace window at junctions
   shakeT: 0, helmetSlip: false,
+  facing: 1,           // 1 = faces screen-right, -1 = screen-left; never rotated
+  crumbs: [],          // recent digger pixel positions — the dog's trail
+  dogFacing: 1, dogPrev: null,
   particles: [],
   bothArmed: true,     // require full release between both-press triggers
   totals(){ return {
@@ -411,6 +426,7 @@ function layout(){
   cs = Math.floor(Math.min(W/G.maze.cols, (H-skyH)/G.maze.rowsN));
   ox = Math.round((W - cs*G.maze.cols)/2);
   oy = skyH;
+  G.crumbs = []; G.dogPrev = null;  // pixel trail is stale after relayout
   buildStaticLayer();
 }
 window.addEventListener('resize', layout);
@@ -552,6 +568,9 @@ function setupStage(idx){
   G.bumps = [];
   G.stageMs = 0;
   G.helmetSlip = false;
+  G.facing = 1;
+  G.crumbs = []; G.dogPrev = null; G.dogFacing = 1;
+  G.pendingSide = null; G.pendingMs = 0;
   G.particles = [];
   G.phase = 'briefing';
   layout();
@@ -572,6 +591,7 @@ function beginMove(){
   G.moveFrom = {...G.cell};
   G.moveTo = { c: G.cell.c + G.heading.dx, r: G.cell.r + G.heading.dy };
   G.moveT = 0;
+  if(G.heading.dx !== 0) G.facing = G.heading.dx;
   G.phase = 'digging';
 }
 
@@ -599,13 +619,16 @@ function enterJunction(){
   G.lastJunction = { cell:{...G.cell}, heading:{...G.heading} };
   G.sinceJunction = [{...G.cell}];
   G.junctionWaitMs = 0; G.recueMs = 0;
+  G.pendingSide = null; G.pendingMs = 0;
   AudioFX.junctionCue();
   buzz(30);
 }
 
-function chooseAtJunction(side){ // side: 'left' | 'right'
-  const dir = side==='left'? turnLeft(G.heading) : turnRight(G.heading);
-  if(G.maze.isOpen(G.cell.c+dir.dx, G.cell.r+dir.dy)){
+function chooseAtJunction(side){ // side: 'left' | 'right' — SCREEN directions
+  G.pendingSide = null;
+  const dir = side==='left'? DIRS.left : DIRS.right;
+  const isReverse = (dir.dx === -G.heading.dx && dir.dy === -G.heading.dy);
+  if(!isReverse && G.maze.isOpen(G.cell.c+dir.dx, G.cell.r+dir.dy)){
     G.heading = dir;
     beginMove();
   }else{
@@ -613,7 +636,8 @@ function chooseAtJunction(side){ // side: 'left' | 'right'
   }
 }
 
-function goStraightAtJunction(){ // only reachable when junctionPauseMs > 0
+function chooseStraight(){ // the both-buttons chord (and timed-window default)
+  G.pendingSide = null;
   if(G.maze.isOpen(G.cell.c+G.heading.dx, G.cell.r+G.heading.dy)) beginMove();
   else inPlaceBump();
 }
@@ -779,9 +803,13 @@ function update(dt){
   else if(G.phase==='junction'){
     G.recueMs += dt;
     if(G.recueMs >= CONFIG.junctionRecueMs){ G.recueMs = 0; AudioFX.junctionCue(); buzz(20); }
+    if(G.pendingSide){ // single press waits briefly for its chord partner
+      G.pendingMs += dt;
+      if(G.pendingMs >= CONFIG.chordWindowMs){ chooseAtJunction(G.pendingSide); }
+    }
     if(CONFIG.junctionPauseMs > 0){
       G.junctionWaitMs += dt;
-      if(G.junctionWaitMs >= CONFIG.junctionPauseMs){ G.junctionWaitMs = 0; goStraightAtJunction(); }
+      if(G.junctionWaitMs >= CONFIG.junctionPauseMs){ G.junctionWaitMs = 0; chooseStraight(); }
     }
   }
   else if(G.phase==='stunned'){
@@ -804,6 +832,16 @@ function update(dt){
   }
 
   if(G.shakeT>0) G.shakeT -= dt;
+
+  // breadcrumbs for the dog — it retraces the digger's exact path
+  if(PLAY_PHASES.has(G.phase)){
+    const p = diggerXY();
+    const last = G.crumbs[G.crumbs.length-1];
+    if(!last || Math.hypot(p.x-last.x, p.y-last.y) > 1.5){
+      G.crumbs.push({x:p.x, y:p.y});
+      if(G.crumbs.length > 600) G.crumbs.shift();
+    }
+  }
 
   // particles
   for(let i=G.particles.length-1;i>=0;i--){
@@ -841,10 +879,15 @@ function render(now){
   if(CONFIG.showLiveDigger || !PLAY_PHASES.has(G.phase)){
     if(G.phase==='briefing' || G.phase==='countdown'){
       const s0 = cellCenter(G.maze.start.c, G.maze.start.r);
-      drawDigger(s0.x, oy - cs*0.42, 0, now);   // waiting on the surface
+      drawDigger(s0.x, oy - cs*0.42, now);           // waiting on the surface
+      if(CONFIG.showDog) drawDog(s0.x - cs*0.85, oy - cs*0.24, 1, false, now);
     }else{
       const p = diggerXY();
-      drawDigger(p.x, p.y, headingAngle(G.heading), now);
+      drawDigger(p.x, p.y, now);
+      if(CONFIG.showDog){
+        const d = dogXY();
+        drawDog(d.x, d.y, G.dogFacing, d.moving, now);
+      }
     }
   }
 
@@ -911,14 +954,16 @@ function drawStar(x, y, r, fill, stroke){
   ctx.restore();
 }
 
-function drawDigger(x, y, ang, now){
+function drawDigger(x, y, now){
+  // Always upright, mirrored by facing — never rotated (an upside-down
+  // digger reads as nonsense to a small Navigator).
   const s = cs*0.62;
   const digging = G.phase==='digging';
   const bob = (!reducedMotion && digging)? Math.sin(now/70)*s*0.05 : 0;
   const jab = (!reducedMotion && digging)? Math.sin(now/60)*s*0.08 : 0;
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(ang);
+  ctx.scale(G.facing, 1);
   ctx.translate(0, bob);
   // spade out front
   ctx.fillStyle = PAL.spade;
@@ -946,6 +991,78 @@ function drawDigger(x, y, ang, now){
   ctx.fillStyle = PAL.hat;
   ctx.beginPath(); ctx.arc(s*0.2 + slip*0.6, -s*0.24 + slip*0.5, s*0.2, Math.PI, 0); ctx.fill();
   ctx.fillRect(s*0.2 - s*0.26 + slip*0.6, -s*0.26 + slip*0.5, s*0.52, s*0.06);
+  ctx.restore();
+}
+
+/* The dog trots a fixed distance behind the digger along its exact trail —
+   so it turns around and backs up after a bump, which is most of the joke. */
+function dogXY(){
+  const lag = CONFIG.dogLagTiles * cs;
+  const cr = G.crumbs;
+  let pos = null;
+  if(cr.length >= 2){
+    let acc = 0;
+    for(let i=cr.length-1; i>0; i--){
+      const a = cr[i], b = cr[i-1];
+      const seg = Math.hypot(a.x-b.x, a.y-b.y);
+      if(acc + seg >= lag){
+        const t = (lag - acc)/seg;
+        pos = { x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t };
+        break;
+      }
+      acc += seg;
+    }
+    if(!pos) pos = {...cr[0]};
+  }else{
+    const p = diggerXY();
+    pos = { x: p.x, y: p.y };
+  }
+  let moving = false;
+  if(G.dogPrev){
+    const dx = pos.x - G.dogPrev.x;
+    if(Math.abs(dx) > 0.4) G.dogFacing = dx > 0 ? 1 : -1;
+    moving = Math.hypot(dx, pos.y - G.dogPrev.y) > 0.4;
+  }
+  G.dogPrev = { x: pos.x, y: pos.y };
+  return { x: pos.x, y: pos.y, moving };
+}
+
+function drawDog(x, y, facing, moving, now){
+  const s = cs*0.4;
+  const trot = (!reducedMotion && moving)? Math.sin(now/55)*s*0.09 : 0;
+  ctx.save();
+  ctx.translate(x, y + s*0.18);
+  ctx.scale(facing, 1);
+  ctx.translate(0, trot);
+  const coat = '#8C7B66', dark = '#6E5F4D';
+  // legs
+  ctx.strokeStyle = dark; ctx.lineWidth = Math.max(1.5, s*0.14); ctx.lineCap='round';
+  const step = (!reducedMotion && moving)? Math.sin(now/55)*s*0.14 : 0;
+  ctx.beginPath(); ctx.moveTo(-s*0.32, s*0.1); ctx.lineTo(-s*0.32 - step, s*0.42); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( s*0.18, s*0.1); ctx.lineTo( s*0.18 + step, s*0.42); ctx.stroke();
+  // body
+  ctx.fillStyle = coat;
+  ctx.beginPath(); ctx.ellipse(-s*0.05, 0, s*0.42, s*0.24, 0, 0, Math.PI*2); ctx.fill();
+  // tail — a happy stub
+  const wag = (!reducedMotion)? Math.sin(now/90)*0.5 : 0;
+  ctx.strokeStyle = coat; ctx.lineWidth = Math.max(1.5, s*0.12);
+  ctx.beginPath(); ctx.moveTo(-s*0.45, -s*0.06);
+  ctx.lineTo(-s*0.62, -s*0.22 - wag*s*0.12); ctx.stroke();
+  // head
+  ctx.fillStyle = coat;
+  ctx.beginPath(); ctx.arc(s*0.42, -s*0.16, s*0.22, 0, Math.PI*2); ctx.fill();
+  // snout
+  ctx.fillStyle = dark;
+  ctx.beginPath(); ctx.ellipse(s*0.58, -s*0.1, s*0.12, s*0.08, 0, 0, Math.PI*2); ctx.fill();
+  // floppy ear (it pricks up for gems — but gems are a v2 story)
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.moveTo(s*0.34, -s*0.34); ctx.quadraticCurveTo(s*0.2, -s*0.1, s*0.34, -s*0.04);
+  ctx.quadraticCurveTo(s*0.44, -s*0.16, s*0.34, -s*0.34);
+  ctx.fill();
+  // deadpan dot eye
+  ctx.fillStyle = PAL.ink;
+  ctx.beginPath(); ctx.arc(s*0.48, -s*0.22, s*0.035, 0, Math.PI*2); ctx.fill();
   ctx.restore();
 }
 
@@ -987,7 +1104,7 @@ function showBriefing(){
   showPanel(
     '<h1>'+STAGES[G.stageIdx].name+' of 3</h1>'+
     '<p>Make a plan together!</p>'+
-    '<p class="vocab"><b class="g">Green</b> is left &middot; <b class="r">Red</b> is right</p>'+
+    '<p class="vocab"><b class="g">Green</b> is left &middot; <b class="r">Red</b> is right<br>Both together is straight on</p>'+
     '<p class="hint">Driver: eyes closed? Hold both buttons to start</p>'
   );
 }
@@ -999,8 +1116,13 @@ let leftHeld = false, rightHeld = false;
 
 function press(side){
   AudioFX.unlock();
-  if(G.phase==='junction') chooseAtJunction(side);
-  // presses mid-corridor or mid-stun are silently ignored — the digger digs on
+  if(G.phase!=='junction') return; // mid-corridor presses are silently ignored
+  if(G.pendingSide && G.pendingSide!==side){
+    // second button landed inside the grace window — that's the chord
+    chooseStraight();
+  }else if(!G.pendingSide){
+    G.pendingSide = side; G.pendingMs = 0;
+  }
 }
 
 function bothPressCheck(){
@@ -1039,12 +1161,13 @@ document.addEventListener('touchstart', e=>{
 }, {passive:false});
 document.addEventListener('gesturestart', e=> e.preventDefault());
 
-// Arrow keys mirror the buttons for desktop testing; Enter = both-press.
+// Arrow keys mirror the buttons for desktop testing; Enter/Space/Down = chord.
 window.addEventListener('keydown', e=>{
   if(e.repeat) return;
   if(e.key==='ArrowLeft'){ leftHeld = true; press('left'); bothPressCheck(); }
   else if(e.key==='ArrowRight'){ rightHeld = true; press('right'); bothPressCheck(); }
-  else if(e.key==='Enter' || e.key===' '){
+  else if(e.key==='Enter' || e.key===' ' || e.key==='ArrowDown'){
+    if(G.phase==='junction'){ chooseStraight(); return; }
     leftHeld = true; rightHeld = true; bothPressCheck();
     leftHeld = false; rightHeld = false; G.bothArmed = true;
   }

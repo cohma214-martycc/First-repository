@@ -20,8 +20,10 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 - Cannot touch the screen during a stage. Her controller is her voice.
 
 ### Colour vocabulary (core mechanic — non-negotiable)
-- LEFT = **GREEN**. RIGHT = **RED** ("Red" and "Right" share the R — the mnemonic is deliberate).
-- Alma calls "green!" or "red!", not "left/right" (though both work socially — the game never punishes vocabulary).
+- Directions are **screen directions** — exactly what the Navigator sees on the map, never relative to the digger. A 4.5-year-old must never have to mentally rotate ("his left or my left?"). What Alma sees is what the buttons do.
+- LEFT = **GREEN** = dig toward the screen's left. RIGHT = **RED** = dig toward the screen's right ("Red" and "Right" share the R — the mnemonic is deliberate).
+- **BOTH BUTTONS TOGETHER = STRAIGHT ON** — keep digging the way the digger is already heading. Alma calls "both!" (or "straight!"). The chord is also the ready/continue signal between stages, so the pair learns it before they ever need it underground. A single press waits a short grace window (`chordWindowMs`) for its partner before committing, so chords never misfire as turns.
+- Alma calls "green!", "red!" or "both!", not "left/right" (though all work socially — the game never punishes vocabulary).
 - The two on-screen buttons are large solid blocks of these colours, fixed to the bottom-left and bottom-right corners so the Driver's thumbs never hunt. Minimum touch target: bottom 22% of screen height, each button 50% of screen width. They are the only touch targets during play.
 - Colours must be a settings value, not hard-coded (see §7) — if green/red proves confusing or inaccessible we may swap to blue/orange.
 
@@ -30,7 +32,7 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 ## 2. Core Loop (one stage)
 
 1. **Briefing (eyes open):** Both players see the stage map. They talk through the route, agree on a plan, giggle. Driver taps both buttons simultaneously to confirm "eyes closing now" — this is the ready signal and starts the stage.
-2. **Digging (eyes closed):** The digger auto-digs forward at constant speed. At each junction the digger **pauses** and an audio cue plays (a soft "hm?" plus a haptic tick). The Driver presses GREEN or RIGHT/RED as directed. No press within the junction window = digger continues straight if straight exists, otherwise bumps.
+2. **Digging (eyes closed):** The digger auto-digs forward at constant speed. At each junction the digger **pauses** and an audio cue plays (a soft "hm?" plus a haptic tick). The Driver presses GREEN (screen-left), RED (screen-right), or BOTH TOGETHER (straight on) as directed, and the digger waits until a press arrives (v1). With timed windows (v3+), no press = digger continues straight if straight exists, otherwise bumps.
 3. **Bumps:** Hitting rock/roots/dead-end soil = a comedy event, not a failure. Screen shake, dust puff, a silly *thud-boing* sound, strong haptic buzz, the digger's helmet slips over its eyes. The digger **bounces back to the last junction** and re-pauses. Bumps are counted but never end a run.
 4. **Breakthrough (stage complete):** The digger breaks through into a cavern or up through the surface — a soft, satisfying collapse of dirt. Fanfare, haptic celebration. On-screen banner: "OPEN YOUR EYES!"
 5. **Reveal (eyes open):** The full maze is shown with the actual path traced in a contrasting line, **bump locations marked with little stars/bruise icons** — this is the laugh-together moment. Stats: time, bumps, personal best comparison. Both players tap their button together to continue.
@@ -43,10 +45,14 @@ A **run** = 3 stages (easy → medium → spicy). A run takes roughly 5–10 min
 
 The digger auto-moves. The Driver only ever chooses at junctions. Complexity therefore scales through **maze topology and timing**, never through added inputs:
 
+**Junction authoring rule (screen-direction invariant):** junctions may only occur while the digger is travelling **vertically** (heading up or down), so the possible answers at any pause are always screen-left (green), screen-right (red), or straight on (both). Horizontal corridors contain corners only — the digger auto-turns, no choice, no pause. This keeps every call Alma makes a plain "green / red / both" with zero ambiguity. Generators (v2+) must respect this invariant.
+
+**The digger is always drawn upright.** It faces its travel direction by horizontal mirroring only — never rotation. An upside-down digger reads as nonsense to a small Navigator.
+
 | Lever | Easy | Harder |
 |---|---|---|
 | Junctions per stage | 2 | 8+ |
-| Junction types | T-junctions (forced choice) | 4-way crossings (straight is an option — *not pressing* becomes a move) |
+| Junction types | Side-to-side T's (green/red only) | Crossings where **straight on (the chord)** is the answer, or a tempting shaft |
 | Dead ends | 1, shallow | Several, deep, with tempting gems inside |
 | Junction pause window | Generous (digger waits indefinitely, v1) | Timed window (press within N seconds or go straight/bump) |
 | Dig speed | Slow | Faster between junctions |
@@ -86,7 +92,7 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
   - `gem` #B23A48 (dusty red — the one saturated accent on screen)
   - `button-left` #5E7C4A (green), `button-right` #A6423A (red) — muted to sit inside the palette, still unmistakably green/red
 - **Texture:** flat colour fields with a very subtle paper grain overlay. No gradients, no gloss, no outlines thicker than 1px. Rocks are soft blobs a shade darker than soil. Roots dangle from the surface. The occasional buried oddity (bone, old boot, teacup) as silent jokes in the dirt — decorative only.
-- **Characters:** small, simple, deadpan. The digger is a little figure with a hard hat and a spade, drawn in 2–3 flat colours. **A small dog companion** trots along the tunnel behind the digger; when a gem is nearby the dog's ear pricks up — a visual whisper only the Navigator sees. (The dog always knows.)
+- **Characters:** small, simple, deadpan. The digger is a little figure with a hard hat and a spade, drawn in 2–3 flat colours, always upright (mirrored, never rotated). **A small dog companion** (in from v1) trots along the dug tunnel a step behind the digger, following its exact path — including sliding backwards after a bump. When a gem is nearby (v2+) the dog's ear pricks up — a visual whisper only the Navigator sees. (The dog always knows.)
 - **Motion:** minimal and dry. The dig is a steady rhythmic animation. Bumps are the biggest motion on screen. The breakthrough is dirt crumbling away in chunky flat particles. Respect `prefers-reduced-motion`.
 - **Typography:** one rounded, friendly display face for banners ("OPEN YOUR EYES!") and a plain body face for stats. Sentence case everywhere. Words on screen are for the Navigator — keep them short enough for an early reader: "Ready?", "Go!", "Found a gem!", "You made it!"
 - **Signature element:** the eyes-open **reveal page** — the whole maze rendered like a finished picture-book spread with the pair's wobbly path inked through it and bump-stars marking every thud. This is the screenshot-worthy moment; polish it hardest.
@@ -96,18 +102,19 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 ## 6. Version Roadmap
 
 ### v1 — Prove the ritual (build this first, complete and polished)
-- One run = 3 stages, fixed hand-authored mazes (not procedural yet): stage 1 = two junctions + one dead end; stages 2–3 slightly larger.
-- Full colour-button control scheme, junction pause (untimed — digger waits), bumps with sound/haptics/shake, breakthrough, reveal screen with path trace and bump stars, stats.
+- One run = 3 stages, fixed hand-authored mazes (not procedural yet) that **ramp hard across the run**: stage 1 = 2 junctions (green/red T's only, shallow dead ends); stage 2 = 4 junctions (introduces straight-on chord junctions, deeper dead ends); stage 3 = 6 junctions (chords, a tempting dead-end shaft, deepest maze).
+- Full colour-button control scheme incl. the both-buttons straight-on chord, junction pause (untimed — digger waits), bumps with sound/haptics/shake, breakthrough, reveal screen with path trace and bump stars, stats.
+- The dog companion trotting behind the digger (its gem-sense waits for gems in v2).
 - Navigator sees live digger position.
 - Simultaneous-press ready signal and continue signal.
 - localStorage: personal bests, total runs.
 - Dev settings panel (§7) — in from day one.
-- **No** daily seeds, streaks, gems, dog, or journal yet. Ship the loop.
+- **No** daily seeds, streaks, gems, or journal yet. Ship the loop.
 
 ### v2 — Make it a ritual
 - Procedural maze generation from daily date seed, 3-stage ramp.
 - Streak system + streak-driven difficulty (capped, as §4).
-- Gems + the dog companion + dead-end temptations.
+- Gems + dead-end temptations + the dog's gem-sense (the ear prick).
 - Journal: stamped entries per completed run (date, stats, maze thumbnail). Same localStorage journaling pattern as Creature Keepers v3.
 - Map panel for the Navigator alongside the live view.
 
@@ -146,7 +153,10 @@ const CONFIG = {
   // controls & accessibility
   colourLeft: '#5E7C4A', colourRight: '#A6423A',
   buttonHeightPct: 22,
+  chordWindowMs: 250,       // grace period for the both-buttons straight-on chord
   hapticsEnabled: true, audioVolume: 0.8,
+  // companions
+  showDog: true, dogLagTiles: 0.85,   // how far behind the digger the dog trots
   // navigator information
   showLiveDigger: true,     // v1 true; map/memory modes flip this
   positionUpdateAtJunctionsOnly: false,
