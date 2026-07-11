@@ -72,7 +72,7 @@ The digger auto-moves. The Driver only ever chooses at junctions. Complexity the
 ## 4. Maze Completion & Progression
 
 - **Stage complete:** breakthrough animation → reveal → stats → next stage.
-- **Run complete (3 stages):** the digger surfaces into the backyard at sunset. Journal entry is stamped automatically: date, total time, total bumps, gems, a tiny thumbnail of the final maze with the path drawn. Streak counter increments.
+- **Run complete (3 stages):** the digger surfaces into the backyard at sunset. The reward scene: **a pitcher of chocolate milk and a plate of animal biscuits** rises onto the screen — the traditional after-digging snack, and the game's way of saying the ritual is over for today. Journal entry (v2) is stamped automatically: date, total time, total bumps, gems, a tiny thumbnail of the final maze with the path drawn. Streak counter increments.
 - **Daily seed:** each calendar day generates its mazes from a date-based seed (same approach as CircleSquareTriangle) — everyone gets the same day's tunnels, replayable for personal best.
 - **Difficulty over time:** difficulty is driven by **streak, gently, with a cap** — not by raw calendar. Streak 1–3: baseline. Each streak milestone nudges one lever (a junction here, a shorter pause window there) up to a ceiling at streak ~14. Breaking a streak drops difficulty back two notches, never to zero. Rationale: the game must stay winnable by a pair having an off day; frustration kills the ritual.
 - Personal best is stored **per daily seed** and as an all-time "smoothest run" (fewest bumps) and "fastest run".
@@ -84,6 +84,8 @@ The digger auto-moves. The Driver only ever chooses at junctions. Complexity the
 Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave Dig a Hole* — an **homage in spirit, all original assets**. Do not copy characters, compositions, or trade dress.
 
 - **View:** side-on cross-section of the earth, like the page of a picture book. A thin strip of pale sky at the very top with a small house, a bare tree, maybe washing on a line. Everything below is soil.
+- **The cat:** from stage 2 onward a small cat sits on the roof of the house, watching. It never does anything except flick its tail. It is never mentioned. Navigators notice it around the second or third run; that moment belongs to them.
+- **Spectacular buried treasure (decorative, v1):** clusters of gems and little hoards of gold coins sit in the solid earth *agonisingly close* to the tunnels — visible to the Navigator with a soft sparkle, never collectible, never acknowledged by the game. The digger walks straight past a fortune, every stage, forever. That's the joke. (Collectible gems remain a v2 mechanic; these decorative ones stay even then, because the digger never gets better at this.)
 - **Palette (tokens, tune in settings):**
   - `soil-deep` #4A3728 (undug earth, matte)
   - `soil-warm` #6B4F35 (mid earth, subtle grain texture)
@@ -105,6 +107,7 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - One run = 3 stages, fixed hand-authored mazes (not procedural yet) that **ramp hard across the run**: stage 1 = 2 junctions (green/red T's only, shallow dead ends); stage 2 = 4 junctions (introduces straight-on chord junctions, deeper dead ends); stage 3 = 6 junctions (chords, a tempting dead-end shaft, deepest maze).
 - Full colour-button control scheme incl. the both-buttons straight-on chord, junction pause (untimed — digger waits), bumps with sound/haptics/shake, breakthrough, reveal screen with path trace and bump stars, stats.
 - The dog companion trotting behind the digger (its gem-sense waits for gems in v2).
+- The cat on the roof (from stage 2), decorative buried treasure with its sparkle, and the chocolate-milk-and-animal-biscuits scene on run complete.
 - Navigator sees live digger position.
 - Simultaneous-press ready signal and continue signal.
 - localStorage: personal bests, total runs.
@@ -155,8 +158,10 @@ const CONFIG = {
   buttonHeightPct: 22,
   chordWindowMs: 250,       // grace period for the both-buttons straight-on chord
   hapticsEnabled: true, audioVolume: 0.8,
-  // companions
+  // companions & silent jokes
   showDog: true, dogLagTiles: 0.85,   // how far behind the digger the dog trots
+  showCat: true,            // roof cat, stage 2 onward
+  treasureCount: 3,         // decorative gem/gold spots per stage (never collectible)
   // navigator information
   showLiveDigger: true,     // v1 true; map/memory modes flip this
   positionUpdateAtJunctionsOnly: false,

@@ -158,8 +158,10 @@ const CONFIG_DEFAULTS = {
   buttonHeightPct: 22,
   chordWindowMs: 250,       // grace period for the both-buttons straight-on chord
   hapticsEnabled: true, audioVolume: 0.8,
-  // companions
+  // companions & silent jokes
   showDog: true, dogLagTiles: 0.85,   // how far behind the digger the dog trots
+  showCat: true,            // roof cat, stage 2 onward
+  treasureCount: 3,         // decorative gem/gold spots per stage (never collectible)
   // navigator information
   showLiveDigger: true,
   positionUpdateAtJunctionsOnly: false,
@@ -396,6 +398,8 @@ const G = {
   facing: 1,           // 1 = faces screen-right, -1 = screen-left; never rotated
   crumbs: [],          // recent digger pixel positions — the dog's trail
   dogFacing: 1, dogPrev: null,
+  treasure: [],        // decorative gems/gold in the walls — never collectible
+  snackT: 0,           // run-complete snack scene timer
   particles: [],
   bothArmed: true,     // require full release between both-press triggers
   totals(){ return {
@@ -494,6 +498,27 @@ function buildStaticLayer(){
   spots.forEach(sp=> drawOddity(s, ox+sp.c*cs+cs/2, oy+sp.r*cs+cs/2, cs*0.55, sp.kind));
   s.globalAlpha = 1;
 
+  // spectacular treasure the digger will never find — always one wall away
+  // from a tunnel, visible to the Navigator, never collectible. The joke.
+  G.treasure = [];
+  const nearTunnel = (c,r)=> m.isOpen(c+1,r)||m.isOpen(c-1,r)||m.isOpen(c,r+1)||m.isOpen(c,r-1);
+  const tCandidates = [];
+  for(let r=1;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(!m.isOpen(c,r) && nearTunnel(c,r) && !spots.some(sp=>sp.c===c&&sp.r===r)) tCandidates.push({c,r});
+  }
+  for(let i=tCandidates.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); const tmp=tCandidates[i]; tCandidates[i]=tCandidates[j]; tCandidates[j]=tmp; }
+  const taken = [];
+  for(const cand of tCandidates){
+    if(taken.length >= CONFIG.treasureCount) break;
+    if(taken.some(t=> Math.abs(t.c-cand.c)+Math.abs(t.r-cand.r) < 3)) continue;
+    taken.push(cand);
+  }
+  taken.forEach((t,i)=>{
+    const kind = i%2===0? 'gems':'gold';
+    G.treasure.push({c:t.c, r:t.r, kind});
+    drawTreasure(s, ox+t.c*cs+cs/2, oy+t.r*cs+cs/2, cs, kind);
+  });
+
   // very subtle paper grain
   s.globalAlpha = 0.05;
   for(let i=0;i<W*H/160;i++){
@@ -532,6 +557,32 @@ function drawSkyScene(s, rnd){
     s.fillStyle = cols[i-1]; s.fillRect(x-4, y, 8, 9);
   }
   s.globalAlpha=1;
+}
+
+function drawTreasure(s, x, y, sz, kind){
+  if(kind==='gems'){
+    const gem = (gx,gy,r)=>{
+      s.fillStyle = PAL.gem;
+      s.beginPath();
+      s.moveTo(gx, gy-r); s.lineTo(gx+r*0.8, gy); s.lineTo(gx, gy+r); s.lineTo(gx-r*0.8, gy);
+      s.closePath(); s.fill();
+      s.fillStyle = 'rgba(242,232,216,0.4)'; // facet glint
+      s.beginPath(); s.moveTo(gx, gy-r); s.lineTo(gx+r*0.3, gy-r*0.25); s.lineTo(gx-r*0.25, gy-r*0.2);
+      s.closePath(); s.fill();
+    };
+    gem(x-sz*0.14, y+sz*0.08, sz*0.2);
+    gem(x+sz*0.16, y+sz*0.14, sz*0.14);
+    gem(x+sz*0.02, y-sz*0.16, sz*0.12);
+  }else{ // a little hoard of gold coins
+    const coin = (gx,gy)=>{
+      s.fillStyle = '#C9A034';
+      s.beginPath(); s.ellipse(gx, gy, sz*0.13, sz*0.09, 0, 0, Math.PI*2); s.fill();
+      s.strokeStyle = '#8F7124'; s.lineWidth = 1;
+      s.beginPath(); s.ellipse(gx, gy, sz*0.13, sz*0.09, 0, 0, Math.PI*2); s.stroke();
+    };
+    coin(x-sz*0.16, y+sz*0.14); coin(x+sz*0.14, y+sz*0.14);
+    coin(x-sz*0.01, y+sz*0.12); coin(x-sz*0.02, y-sz*0.04);
+  }
 }
 
 function drawOddity(s, x, y, sz, kind){
@@ -718,8 +769,10 @@ function finishRun(){
   LS.set('runs', runs);
   releaseWake();
   G.phase = 'runComplete';
+  G.snackT = 0;
   showPanel(
     '<h1>You made it!</h1>'+
+    '<p class="vocab">Snack time!</p>'+
     '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' bumps &#9733;</p>'+
     (badges.length? badges.map(x=>'<span class="badge">'+x+'</span>').join('') : '')+
     '<p class="dim">Best: '+fmtTime(best.fastestMs)+' &middot; smoothest '+best.fewestBumps+' bumps<br>Runs together: '+runs+'</p>'+
@@ -830,6 +883,9 @@ function update(dt){
     G.bannerT -= dt;
     if(G.bannerT<=0) showReveal();
   }
+  else if(G.phase==='runComplete'){
+    G.snackT += dt;
+  }
 
   if(G.shakeT>0) G.shakeT -= dt;
 
@@ -872,6 +928,8 @@ function render(now){
     ctx.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
   });
 
+  if(CONFIG.showCat && G.stageIdx >= 1) drawCat(now);
+  drawSparkles(now);
   drawExitMarker(now);
 
   if(G.phase==='reveal' || G.phase==='runComplete') drawPathTrace();
@@ -898,6 +956,8 @@ function render(now){
     ctx.fillRect(p.x-p.size/2, p.y-p.size/2, p.size, p.size);
   });
   ctx.globalAlpha = 1;
+
+  if(G.phase==='runComplete') drawSnackScene(now);
 
   if(CONFIG.debugOverlay) drawDebug();
 }
@@ -991,6 +1051,130 @@ function drawDigger(x, y, now){
   ctx.fillStyle = PAL.hat;
   ctx.beginPath(); ctx.arc(s*0.2 + slip*0.6, -s*0.24 + slip*0.5, s*0.2, Math.PI, 0); ctx.fill();
   ctx.fillRect(s*0.2 - s*0.26 + slip*0.6, -s*0.26 + slip*0.5, s*0.52, s*0.06);
+  ctx.restore();
+}
+
+/* From stage 2, a small cat sits on the roof. It never does anything except
+   flick its tail. It is never mentioned. */
+function drawCat(now){
+  const hw = Math.min(46, skyH*0.9), hx = W*0.16, hh = hw*0.62;
+  const peakX = hx + hw/2, peakY = skyH - hh - hw*0.42;
+  const s = Math.max(9, hw*0.3);
+  const x = peakX, y = peakY;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = PAL.ink;
+  // tail — the only motion
+  const flick = reducedMotion? 0 : Math.sin(now/700)*s*0.18;
+  ctx.strokeStyle = PAL.ink; ctx.lineWidth = Math.max(1.5, s*0.14); ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(-s*0.42, -s*0.12);
+  ctx.quadraticCurveTo(-s*0.75, -s*0.3, -s*0.7 - flick*0.3, -s*0.62 - flick);
+  ctx.stroke();
+  // sitting body
+  ctx.beginPath(); ctx.ellipse(-s*0.1, -s*0.28, s*0.34, s*0.3, 0, 0, Math.PI*2); ctx.fill();
+  // head + ears
+  ctx.beginPath(); ctx.arc(s*0.22, -s*0.62, s*0.22, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(s*0.06, -s*0.74); ctx.lineTo(s*0.08, -s*0.95); ctx.lineTo(s*0.2, -s*0.8); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(s*0.3, -s*0.82); ctx.lineTo(s*0.38, -s*0.98); ctx.lineTo(s*0.42, -s*0.76); ctx.closePath(); ctx.fill();
+  // deadpan eyes
+  ctx.fillStyle = PAL.sky;
+  ctx.beginPath(); ctx.arc(s*0.16, -s*0.64, s*0.035, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(s*0.3, -s*0.64, s*0.035, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+/* Soft sparkle over the treasure — a whisper only the Navigator sees. */
+function drawSparkles(now){
+  G.treasure.forEach((t,i)=>{
+    const p = cellCenter(t.c, t.r);
+    const a = reducedMotion? 0.4 : 0.25 + 0.25*Math.sin(now/320 + i*2.1);
+    if(a <= 0.05) return;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = PAL.paper; ctx.lineWidth = 1;
+    const r = cs*0.16, sx = p.x + cs*0.28, sy = p.y - cs*0.3;
+    ctx.beginPath(); ctx.moveTo(sx-r, sy); ctx.lineTo(sx+r, sy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx, sy-r); ctx.lineTo(sx, sy+r); ctx.stroke();
+    ctx.restore();
+  });
+}
+
+/* Run complete: the traditional after-digging snack rises onto the screen —
+   a pitcher of chocolate milk and a plate of animal biscuits. */
+function drawSnackScene(now){
+  const pop = i =>{
+    if(reducedMotion) return 1;
+    const p = Math.min(1, Math.max(0, (G.snackT - i*220)/380));
+    return 1 - Math.pow(1-p, 3);
+  };
+  const cw = Math.min(320, W*0.86), ch = Math.min(160, H*0.26);
+  const cxx = W/2, top = H*0.16;
+  ctx.save();
+  // picnic cloth
+  const k0 = pop(0);
+  ctx.globalAlpha = k0;
+  ctx.translate(0, (1-k0)*24);
+  ctx.fillStyle = PAL.paper;
+  roundedRect(cxx-cw/2, top, cw, ch, 18);
+  ctx.strokeStyle = PAL.ink; ctx.globalAlpha = k0*0.25; ctx.lineWidth = 1;
+  ctx.strokeRect(cxx-cw/2+6, top+6, cw-12, ch-12);
+  ctx.globalAlpha = k0;
+
+  const baseY = top + ch*0.78;
+  // pitcher of chocolate milk
+  const k1 = pop(1);
+  if(k1>0){
+    ctx.save();
+    const px = cxx - cw*0.28, ph = ch*0.52;
+    ctx.translate(px, baseY); ctx.scale(k1, k1);
+    ctx.fillStyle = '#7B5A3C'; // chocolate milk through the glass
+    ctx.beginPath();
+    ctx.moveTo(-ph*0.3, 0); ctx.lineTo(-ph*0.24, -ph*0.72);
+    ctx.lineTo(-ph*0.34, -ph*0.86); ctx.lineTo(-ph*0.1, -ph*0.8); // spout
+    ctx.lineTo(ph*0.24, -ph*0.8); ctx.lineTo(ph*0.3, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#5C4023'; ctx.lineWidth = Math.max(1.5, ph*0.05); ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(ph*0.28, -ph*0.66); ctx.quadraticCurveTo(ph*0.56, -ph*0.5, ph*0.26, -ph*0.2); ctx.stroke();
+    ctx.fillStyle = 'rgba(242,232,216,0.5)'; // milky sheen
+    ctx.fillRect(-ph*0.16, -ph*0.7, ph*0.09, ph*0.6);
+    ctx.restore();
+  }
+  // glass, already poured
+  const k2 = pop(2);
+  if(k2>0){
+    ctx.save();
+    const gx = cxx - cw*0.04, gh = ch*0.34;
+    ctx.translate(gx, baseY); ctx.scale(k2, k2);
+    ctx.fillStyle = '#7B5A3C';
+    ctx.fillRect(-gh*0.28, -gh*0.8, gh*0.56, gh*0.8);
+    ctx.fillStyle = 'rgba(242,232,216,0.35)';
+    ctx.fillRect(-gh*0.28, -gh*1.0, gh*0.56, gh*0.2);
+    ctx.strokeStyle = 'rgba(51,41,31,0.4)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(-gh*0.28, -gh*1.0, gh*0.56, gh);
+    ctx.restore();
+  }
+  // animal biscuits ambling across the cloth
+  const bisc = (i, bx, flip)=>{
+    const k = pop(3+i);
+    if(k<=0) return;
+    ctx.save();
+    ctx.translate(cxx + bx, baseY - ch*0.03); ctx.scale(k*(flip?-1:1), k);
+    const s = ch*0.16;
+    ctx.fillStyle = '#D9B98A';
+    roundedRect(-s*0.55, -s*0.55, s*1.1, s*0.6, s*0.24);           // body
+    ctx.beginPath(); ctx.arc(s*0.62, -s*0.5, s*0.3, 0, Math.PI*2); ctx.fill(); // head
+    ctx.fillRect(-s*0.42, 0, s*0.2, s*0.3);                        // legs
+    ctx.fillRect(s*0.22, 0, s*0.2, s*0.3);
+    if(i===0){ ctx.fillRect(s*0.82, -s*0.5, s*0.26, s*0.12); }     // elephant trunk
+    if(i===1){ ctx.beginPath(); ctx.arc(s*0.5, -s*0.82, s*0.12, 0, Math.PI*2); ctx.fill(); } // bear ear
+    ctx.restore();
+  };
+  bisc(0, cw*0.12, false);
+  bisc(1, cw*0.27, true);
+  bisc(2, cw*0.40, false);
   ctx.restore();
 }
 
