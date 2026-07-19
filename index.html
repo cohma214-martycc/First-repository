@@ -639,11 +639,10 @@ const AudioFX = (function(){
       tone(330, 110, {type:'triangle', vol:0.16});
       tone(415, 150, {type:'triangle', vol:0.16, delayMs:130});
     },
-    bump(){ // thud…
-      tone(95, 160, {type:'sine', vol:0.5, slideTo:55});
-      // …boing
-      tone(190, 260, {type:'triangle', vol:0.22, slideTo:430, delayMs:90});
-      tone(430, 200, {type:'triangle', vol:0.16, slideTo:150, delayMs:330});
+    bump(dry){ // thud… (dry = the Hat's shell-bonk: same family, less boing)
+      tone(95, 160, {type:'sine', vol: dry? 0.42 : 0.5, slideTo:55});
+      tone(190, 260, {type:'triangle', vol: dry? 0.12 : 0.22, slideTo:430, delayMs:90});
+      if(!dry) tone(430, 200, {type:'triangle', vol:0.16, slideTo:150, delayMs:330});
     },
     ack(){ tone(880, 45, {type:'sine', vol:0.14}); }, // "heard you" — not "correct"
     fanfare(){
@@ -698,6 +697,8 @@ function parseStage(stage){
     cols: grid[0].length,
     rowsN: grid.length,
     start, exit,
+    // a world may enter from the surface (dig down) or the near edge (walk up)
+    startHeading: (start && start.r === grid.length-1)? {dx:0,dy:-1} : {dx:0,dy:1},
     isOpen(c,r){
       if(r<0||c<0||r>=grid.length||c>=grid[0].length) return false;
       return grid[r][c] !== '#';
@@ -708,7 +709,8 @@ function parseStage(stage){
 /* ---------------- Game state --------------------------------------------- */
 const PLAY_PHASES = new Set(['digging','junction','stunned','bouncing']);
 const G = {
-  phase: 'briefing',   // briefing | countdown | digging | junction | stunned | bouncing | breakthrough | reveal | runComplete
+  phase: 'briefing',   // picker | briefing | countdown | digging | junction | stunned | bouncing | breakthrough | reveal | runComplete
+  world: 'tunnels',    // which world this run is in — engine is world-agnostic
   stageIdx: 0,
   runSeed: 0,          // the daily seed this run was generated from
   digSpeed: 1,         // effective speed this stage (base × streak-notch lever)
@@ -744,7 +746,7 @@ const G = {
 /* ---------------- Layout & canvas ---------------------------------------- */
 const canvas = document.getElementById('world');
 const ctx = canvas.getContext('2d');
-let W=0, H=0, DPR=1, cs=0, ox=0, oy=0, skyH=0;
+let W=0, H=0, DPR=1, cs=0, ox=0, oy=0, skyH=0, botH=0;
 let staticLayer = null;
 
 function layout(){
@@ -759,8 +761,9 @@ function layout(){
   canvas.style.width = W+'px';
   canvas.style.height = H+'px';
   ctx.setTransform(DPR,0,0,DPR,0,0);
-  skyH = Math.max(44, Math.round(H*0.12));
-  cs = Math.floor(Math.min(W/G.maze.cols, (H-skyH)/G.maze.rowsN));
+  skyH = WORLD().topStrip();
+  botH = WORLD().bottomStrip();
+  cs = Math.floor(Math.min(W/G.maze.cols, (H-skyH-botH)/G.maze.rowsN));
   ox = Math.round((W - cs*G.maze.cols)/2);
   oy = skyH;
   G.crumbs = []; G.dogPrev = null;  // pixel trail is stale after relayout
@@ -771,16 +774,48 @@ if(window.visualViewport) window.visualViewport.addEventListener('resize', layou
 
 function cellCenter(c,r){ return { x: ox + c*cs + cs/2, y: oy + r*cs + cs/2 }; }
 
-/* ---------------- Static layer: sky, soil, undug maze, decorative dirt --- */
+/* ---------------- Worlds -------------------------------------------------
+   The engine (phases, chord input, junction logic, bounce, timers, reveal
+   flow, stats, persistence) is world-agnostic. Everything a world looks or
+   sounds like lives behind these hooks. Two buttons only, in any world.   */
+const WORLDS = {
+  tunnels: {
+    label: 'Tunnels',
+    companion: true,   // the dog
+    bumpDry: false,
+    speed: ()=> effectiveDigSpeed(),
+    stageFor: (idx)=> stageRowsFor(idx),
+    topStrip: ()=> Math.max(44, Math.round(H*0.12)),   // the sky
+    bottomStrip: ()=> 0,
+    buildStatic: (s, rnd, m)=> buildStaticTunnels(s, rnd, m),
+    drawExtras: (now)=>{ if(CONFIG.showCat && G.stageIdx>=1) drawCat(now); drawSparkles(now); },
+    drawExitMarker: (now)=> drawExitStar(now),
+    drawTrail: ()=> drawPathTrace(),
+    drawWaiting: (now)=>{
+      const s0 = cellCenter(G.maze.start.c, G.maze.start.r);
+      drawDigger(s0.x, oy - cs*0.42, now);             // waiting on the surface
+      if(CONFIG.showDog) drawDog(s0.x - cs*0.85, oy - cs*0.24, 1, false, now);
+    },
+    drawAvatar: (x, y, now)=> drawDigger(x, y, now),
+    drawCelebration: ()=>{},                            // snack scene is shared
+  },
+};
+function WORLD(){ return WORLDS[G.world]; }
+
+/* ---------------- Static layer dispatch ---------------------------------- */
 function buildStaticLayer(){
   const m = G.maze;
   staticLayer = document.createElement('canvas');
   staticLayer.width = canvas.width; staticLayer.height = canvas.height;
   const s = staticLayer.getContext('2d');
   s.setTransform(DPR,0,0,DPR,0,0);
-  // decorative dirt varies with the day, deterministically
+  // decorative details vary with the day, deterministically
   const rnd = mulberry32(hash32(G.runSeed, (G.stageIdx+1)*7919));
+  WORLD().buildStatic(s, rnd, m);
+}
 
+/* ---------------- World One static layer: sky, soil, buried things ------- */
+function buildStaticTunnels(s, rnd, m){
   // sky strip — quiet, pale, a thin picture-book world above
   s.fillStyle = PAL.sky; s.fillRect(0,0,W,skyH);
   drawSkyScene(s, rnd);
@@ -942,10 +977,10 @@ function key(cell){ return cell.c+','+cell.r; }
 
 function setupStage(idx){
   G.stageIdx = idx;
-  G.digSpeed = effectiveDigSpeed(); // streak notch may scale the base speed
-  G.maze = parseStage(stageRowsFor(idx));
+  G.digSpeed = WORLD().speed();      // world base speed × streak-notch lever
+  G.maze = parseStage(WORLD().stageFor(idx));
   G.cell = {...G.maze.start};
-  G.heading = DIRS.down;
+  G.heading = {...G.maze.startHeading};
   G.moveFrom = null; G.moveTo = null; G.moveT = 0;
   G.dug = new Set([key(G.cell)]);
   G.trace = [{...G.cell}];
@@ -1042,7 +1077,7 @@ function chooseStraight(fromPress){ // the both-buttons chord (and timed-window 
 
 /* Bumps are comedy, never failure. */
 function bumpFX(){
-  AudioFX.bump();
+  AudioFX.bump(WORLD().bumpDry);
   buzz([200,80,160]);
   G.shakeT = CONFIG.shakeMs;
   G.helmetSlip = true;
@@ -1289,21 +1324,18 @@ function render(now){
     ctx.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
   });
 
-  if(CONFIG.showCat && G.stageIdx >= 1) drawCat(now);
-  drawSparkles(now);
-  drawExitMarker(now);
+  WORLD().drawExtras(now);
+  WORLD().drawExitMarker(now);
 
-  if(G.phase==='reveal' || G.phase==='runComplete') drawPathTrace();
+  if(G.phase==='reveal' || G.phase==='runComplete') WORLD().drawTrail();
 
   if(CONFIG.showLiveDigger || !PLAY_PHASES.has(G.phase)){
-    if(G.phase==='briefing' || G.phase==='countdown'){
-      const s0 = cellCenter(G.maze.start.c, G.maze.start.r);
-      drawDigger(s0.x, oy - cs*0.42, now);           // waiting on the surface
-      if(CONFIG.showDog) drawDog(s0.x - cs*0.85, oy - cs*0.24, 1, false, now);
+    if(G.phase==='briefing' || G.phase==='countdown' || G.phase==='picker'){
+      WORLD().drawWaiting(now);
     }else{
       const p = diggerXY();
-      drawDigger(p.x, p.y, now);
-      if(CONFIG.showDog){
+      WORLD().drawAvatar(p.x, p.y, now);
+      if(WORLD().companion && CONFIG.showDog){
         const d = dogXY();
         drawDog(d.x, d.y, G.dogFacing, d.moving, now);
       }
@@ -1318,12 +1350,12 @@ function render(now){
   });
   ctx.globalAlpha = 1;
 
-  if(G.phase==='runComplete') drawSnackScene(now);
+  if(G.phase==='runComplete'){ WORLD().drawCelebration(now); drawSnackScene(now); }
 
   if(CONFIG.debugOverlay) drawDebug();
 }
 
-function drawExitMarker(now){
+function drawExitStar(now){
   const e = cellCenter(G.maze.exit.c, G.maze.exit.r);
   const pulse = reducedMotion? 0.25 : 0.18 + 0.12*Math.sin(now/400);
   ctx.globalAlpha = pulse;
