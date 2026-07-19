@@ -145,24 +145,21 @@ The backbone. Everything later hangs off this.
    capped, and reversible by two notches on a break; the floor is always
    winnable-on-an-off-day.
 
-## Open questions (guidance wanted before M-numbers start)
+## Decisions (guidance received — these are settled)
 
-1. **Sequencing.** CLAUDE.md's roadmap runs all of v2 before v2.5, but the
-   Hat's gate is met and M6/M7 only truly depend on M1 (+M2 for shared
-   streaks). Option A: strict order M1→M5 then the Hat. Option B: M1→M2,
-   then jump to M6 (Hat, hand-authored) while gems/journal/plan-trace
-   (M3–M5) follow after. Recommendation: **B** — the ritual is hot now,
-   and the Hat rewards it; gems and the journal deepen it later.
-2. **Streak rules.** What keeps a streak alive? (a) Strict: a completed run
-   every consecutive local calendar day. (b) One-day grace: a single
-   missed day bends but doesn't break (life happens on a Tuesday).
-   Recommendation: **(b) one-day grace** — the difficulty system already
-   assumes streaks break sometimes, but the ritual is a family habit, not
-   a compliance program.
-3. **Plan trace ink.** Snap-to-corridor (clean, forgiving, recommended) or
-   freeform finger ink (more "hers", messier under the reveal)?
-4. **Journal surface.** Minimal (auto-stamp + show the new page on run
-   complete, recommended for v2) or a browsable book UI now?
-
-Default if no guidance arrives: recommendations above (B, one-day grace,
-snap-to-corridor, minimal journal).
+1. **Sequencing: Hat after M1–M2.** Build order is M1 (daily seed +
+   generation) → M2 (streaks) → M6 (Hat, hand-authored, behind the engine
+   refactor) → M7 (procedural desert) → then M3–M5 (gems, journal, plan
+   trace) to deepen the ritual. This intentionally re-orders CLAUDE.md's
+   v2/v2.5 sequence; the gate condition was met, and the decision is
+   recorded here.
+2. **Streak rules: one-day grace.** A completed 3-stage run stamps the
+   day; a single missed local-calendar day bends the streak without
+   breaking it; two consecutive missed days break it (difficulty drops
+   two notches, count restarts, no mournful copy — a new count simply
+   begins).
+3. **Plan trace ink: snap-to-corridor.** Finger drags snap to tunnel
+   centres with a generous touch radius.
+4. **Journal surface: minimal for v2.** Auto-stamp each run and show the
+   fresh page on the run-complete screen; a browsable book waits for a
+   later version if the pair wants to flip back.
