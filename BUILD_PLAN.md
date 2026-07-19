@@ -51,7 +51,13 @@ per-seed "today's best" landed here too. `stageChordShare` joined CONFIG.
   assert validator invariants, assert difficulty monotonicity across the
   three stages.
 
-### M2 — Streak system + capped difficulty (v2)
+### M2 — Streak system + capped difficulty (v2) — **SHIPPED**
+Shipped notes: one-day grace as decided; notch levers are stage-3
+junctions, stage-2 junctions, dead-end depth, then dig speed
+(streakSpeedMult, new in CONFIG); extra junctions buy extra maze rows —
+a T junction geometrically cannot sit directly below another junction's
+row, so crowding starves T placement (found by the max-notch sweep).
+Stage 1 is never nudged. Max-notch 600-maze sweep passes at 100%.
 - `tunnels:streak` = { count, lastPlayedDay }. A day counts when a full
   3-stage run completes. Rules pending guidance (see Open Questions #2);
   default: strict consecutive local-calendar days.

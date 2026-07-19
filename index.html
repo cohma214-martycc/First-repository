@@ -156,9 +156,10 @@ const CONFIG_DEFAULTS = {
   landmarkCount: 4,         // nameable landmarks per Hat stage
   landmarkJunctionRadius: 1,// every junction within this many tiles of a landmark
   hatUnlockRuns: 5,         // completed tunnel runs before World Two appears
-  // difficulty ramp (v2+)
+  // difficulty ramp (v2)
   streakDifficultyStep: 3,
   streakDifficultyCap: 14,
+  streakSpeedMult: 1.15,    // dig-speed lever at the top difficulty notch
   // controls & accessibility
   colourLeft: '#5E7C4A', colourRight: '#A6423A',
   buttonHeightPct: 22,
@@ -362,12 +363,17 @@ function tryCarve(cols, rows, J, deepTarget, chordShare, rnd){
     const snap = ()=> grid.map(row=>row.slice());
     const restore = (s)=>{ for(let i2=0;i2<rows;i2++) grid[i2]=s[i2]; };
 
+    // Descents prefer 2 cells: a T junction can never sit directly below
+    // another junction's row (its horizontals block the route or the arm),
+    // so short descents starve T placement. Budget still gets the last word.
+    const pickV = ()=> vMax >= 2? (rnd()<0.75? 2 : 1) : 1;
+
     // chord junction: route continues straight down, arm tempts to one side
     const doChord = ()=>{
       const s0 = snap();
       const s = rnd()<0.5? 1 : -1;
       if(growArm(c, r, s, armWant) < 1 && growArm(c, r, -s, armWant) < 1){ restore(s0); return false; }
-      const V = 1 + Math.floor(rnd()*vMax);
+      const V = pickV();
       let v = 0;
       for(let k=1;k<=V;k++){ if(canCarve(c, r+k, c, r+k-1)) v = k; else break; }
       if(v < 1){ restore(s0); return false; }
@@ -400,7 +406,7 @@ function tryCarve(cols, rows, J, deepTarget, chordShare, rnd){
         if(routed < 1){ restore(s0); continue; } // even a 1-cell route corners fine
         for(let a=1;a<=routed;a++) carve(c+rs*a, r);
         const c2 = c + rs*routed;
-        const V = 1 + Math.floor(rnd()*vMax);
+        const V = pickV();
         let v = 0;
         for(let k=1;k<=V;k++){ if(canCarve(c2, r+k, c2, r+k-1)) v = k; else break; }
         if(v < 1 || growArm(c, r, -rs, armWant) < 1){ restore(s0); continue; }
@@ -433,14 +439,15 @@ function tryCarve(cols, rows, J, deepTarget, chordShare, rnd){
   return grid.map(row=>row.join(''));
 }
 
-function generateStageRows(stageIdx, baseSeed){
-  const J = CONFIG.stageJunctions[stageIdx];
-  const deep = CONFIG.stageDeadEnds[stageIdx];
-  const chordShare = CONFIG.stageChordShare[stageIdx];
+function generateStageRows(stageIdx, baseSeed, params){
+  const J = params? params.J : CONFIG.stageJunctions[stageIdx];
+  const deep = params? params.deep : CONFIG.stageDeadEnds[stageIdx];
+  const chordShare = params? params.chordShare : CONFIG.stageChordShare[stageIdx];
+  const rows = (params && params.rows)? params.rows : CONFIG.mazeRows;
   for(let attempt=0; attempt<120; attempt++){
     const rnd = mulberry32(hash32(baseSeed, stageIdx*131071 + attempt*977));
-    const rows = tryCarve(CONFIG.mazeCols, CONFIG.mazeRows, J, deep, chordShare, rnd);
-    if(rows && validateStage(rows, J).ok) return rows;
+    const grid = tryCarve(CONFIG.mazeCols, rows, J, deep, chordShare, rnd);
+    if(grid && validateStage(grid, J).ok) return grid;
   }
   return null; // caller falls back to the hand-authored stage
 }
@@ -530,10 +537,62 @@ function solveMaze(rowsArr){
 }
 
 function stageRowsFor(idx){
-  const gen = generateStageRows(idx, G.runSeed);
+  const gen = generateStageRows(idx, G.runSeed, effectiveGenParams(idx));
   if(gen) return { name:'Stage '+(idx+1), rows:gen, generated:true };
   const fb = FALLBACK_STAGES[idx];
   return { name: fb.name, rows: fb.rows, generated:false };
+}
+
+/* ---------------- Streaks & capped difficulty (M2) ------------------------
+   A day counts when a full 3-stage run completes. One missed day bends the
+   streak without breaking it (life happens on a Tuesday); two consecutive
+   missed days start a new count — no mournful copy, ever. Difficulty is a
+   notch level nudged up at streak milestones and dropped two notches on a
+   break, never below baseline. Notches move generator inputs only — the
+   hand-authored fallbacks are never touched.                              */
+function dayNumber(){
+  const d = new Date(); // device-local: the family's calendar, not UTC's
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())/86400000);
+}
+
+function advanceStreak(s, today){
+  const notchCap = Math.floor(CONFIG.streakDifficultyCap / CONFIG.streakDifficultyStep);
+  const out = { count: s.count, lastDay: s.lastDay, notch: s.notch };
+  if(s.lastDay === today) return out;               // replays never double-count
+  if(s.lastDay !== null && today - s.lastDay <= 2){ // consecutive, or one-day grace
+    out.count = s.count + 1;
+    if(out.count % CONFIG.streakDifficultyStep === 0 && out.count <= CONFIG.streakDifficultyCap){
+      out.notch = Math.min(notchCap, s.notch + 1);
+    }
+  }else{
+    out.notch = Math.max(0, s.notch - 2);           // two notches down, never below baseline
+    out.count = 1;                                  // a new count simply begins
+  }
+  out.lastDay = today;
+  return out;
+}
+
+function currentStreak(){
+  return LS.get('streak', { count: 0, lastDay: null, notch: 0 });
+}
+
+/* One lever per notch: junctions first, then dead-end depth, then speed.
+   Stage 1 is never nudged — the teaching stage stays the teaching stage.  */
+function effectiveGenParams(stageIdx){
+  const notch = currentStreak().notch;
+  let J = CONFIG.stageJunctions[stageIdx];
+  let deep = CONFIG.stageDeadEnds[stageIdx];
+  if(notch >= 1 && stageIdx === 2) J += 1;
+  if(notch >= 2 && stageIdx === 1) J += 1;
+  if(notch >= 3 && stageIdx >= 1) deep += 1;
+  // extra junctions buy extra rows — T junctions need breathing room
+  const rows = CONFIG.mazeRows + 2*(J - CONFIG.stageJunctions[stageIdx]);
+  return { J, deep, chordShare: CONFIG.stageChordShare[stageIdx], rows };
+}
+
+function effectiveDigSpeed(){
+  const notch = currentStreak().notch;
+  return CONFIG.digSpeed * (notch >= 4 ? CONFIG.streakSpeedMult : 1);
 }
 
 /* ---------------- Tiny seeded PRNG for decorative dirt ------------------- */
@@ -652,6 +711,7 @@ const G = {
   phase: 'briefing',   // briefing | countdown | digging | junction | stunned | bouncing | breakthrough | reveal | runComplete
   stageIdx: 0,
   runSeed: 0,          // the daily seed this run was generated from
+  digSpeed: 1,         // effective speed this stage (base × streak-notch lever)
   maze: null,
   cell: null,          // current grid cell {c,r}
   heading: DIRS.down,
@@ -882,6 +942,7 @@ function key(cell){ return cell.c+','+cell.r; }
 
 function setupStage(idx){
   G.stageIdx = idx;
+  G.digSpeed = effectiveDigSpeed(); // streak notch may scale the base speed
   G.maze = parseStage(stageRowsFor(idx));
   G.cell = {...G.maze.start};
   G.heading = DIRS.down;
@@ -1061,12 +1122,15 @@ function finishRun(){
   if(bestToday && badges.length===0) badges.push('Best today!');
   const runs = (LS.get('runs', 0)) + 1;
   LS.set('runs', runs);
+  const streak = advanceStreak(currentStreak(), dayNumber());
+  LS.set('streak', streak);
   releaseWake();
   G.phase = 'runComplete';
   G.snackT = 0;
   showPanel(
     '<h1>You made it!</h1>'+
     '<p class="vocab">Snack time!</p>'+
+    '<p class="vocab">Day '+streak.count+' of digging together</p>'+
     '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' bumps &#9733;</p>'+
     (badges.length? badges.map(x=>'<span class="badge">'+x+'</span>').join('') : '')+
     '<p class="dim">Today: '+fmtTime(sb.fastestMs)+' &middot; '+sb.fewestBumps+' bumps'+
@@ -1147,7 +1211,7 @@ function update(dt){
     }
   }
   else if(G.phase==='digging'){
-    G.moveT += dt/1000 * CONFIG.digSpeed;
+    G.moveT += dt/1000 * G.digSpeed;
     if(G.moveT>=1){ arriveAt({...G.moveTo}); }
   }
   else if(G.phase==='junction'){
@@ -1170,7 +1234,7 @@ function update(dt){
     }
   }
   else if(G.phase==='bouncing'){
-    G.bounceT += dt/1000 * CONFIG.digSpeed * CONFIG.bounceSpeedMult;
+    G.bounceT += dt/1000 * G.digSpeed * CONFIG.bounceSpeedMult;
     while(G.bounceT>=1 && G.phase==='bouncing'){
       G.bounceT -= 1; G.bounceIdx++;
       if(G.bounceIdx >= G.bouncePath.length-1){ endBounce(); }
@@ -1759,7 +1823,8 @@ requestAnimationFrame(frame);
 
 // exposed for the tuning panel & automated tests
 window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, setupStage,
-  dailySeed, generateStageRows, validateStage, solveMaze };
+  dailySeed, generateStageRows, validateStage, solveMaze,
+  advanceStreak, currentStreak, effectiveGenParams, dayNumber };
 </script>
 </body>
 </html>
