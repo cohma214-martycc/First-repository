@@ -125,7 +125,14 @@ Stats say "bonks" in the desert.
   already true for this family, so the picker shows on first launch after
   shipping. Until then Tunnels boots directly.
 
-### M7 — Procedural desert + landmark-aware generation (v2.5 H2)
+### M7 — Procedural desert + landmark-aware generation (v2.5 H2) — **SHIPPED**
+Shipped notes: desert derives its own stream from the shared daily seed
+(different maze from the day's tunnels, per guidance). Landmark
+vocabulary grown to 7 distinct kinds (per guidance) so every junction
+seats its own unambiguous landmark within landmarkJunctionRadius; a
+maze that can't seat them is rejected and re-generated. 1200-maze
+sweep (baseline + max-notch) passes at 100%. Hat journal thumbnails
+move to M4 with the journal itself.
 - Same daily seed, third derived stream. The M1 generator gains a
   "landmark pass": every junction within `landmarkJunctionRadius` of a
   nameable landmark, landmarks distinct within a stage.

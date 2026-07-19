@@ -696,6 +696,8 @@ function parseStage(stage){
     cols: grid[0].length,
     rowsN: grid.length,
     start, exit,
+    landmarks: stage.landmarks || null,  // World Two: nameable places
+    decor: stage.decor || null,          // World Two: silent jokes
     // a world may enter from the surface (dig down) or the near edge (walk up)
     startHeading: (start && start.r === grid.length-1)? {dx:0,dy:-1} : {dx:0,dy:1},
     isOpen(c,r){
@@ -811,7 +813,7 @@ const WORLDS = {
     bumpDry: true,     // shell-bonks: same family, drier
     dust: '#CBB78E', burst: ['#CBB78E','#EADDBA'],
     speed: ()=> speedWithNotch(CONFIG.walkSpeed),       // tortoise-slow is the joke
-    stageFor: (idx)=> ({ name:'Stage '+(idx+1), rows: HAT_STAGES[idx].rows, generated:false }),
+    stageFor: (idx)=> hatStageFor(idx),
     topStrip: ()=> 10,
     bottomStrip: ()=> Math.max(52, Math.round(H*0.14)), // the Watcher's rock
     buildStatic: (s, rnd, m)=> buildStaticHat(s, rnd, m),
@@ -859,6 +861,99 @@ const HAT_DECOR = [
   { secondHat:{c:1,r:11}, lizard:{c:1,r:1} },
   { secondHat:{c:7,r:15}, lizard:{c:6,r:11} },
 ];
+
+/* ---------------- Procedural desert (M7 / H2) -----------------------------
+   The desert generates from the SAME daily seed as the tunnels but through
+   its own derived stream — two fresh territories per day, one ritual. A
+   generated tunnel maze is flipped vertically (invariant-preserving, the
+   Seeker walks up-screen), then the landmark pass seats one DISTINCT
+   nameable landmark within landmarkJunctionRadius of every junction, so
+   "green at the cactus!" is always possible and never ambiguous. A maze
+   that cannot seat its landmarks is rejected and re-generated; the flipped
+   hand-authored stages remain the never-broken fallback.                  */
+const LANDMARK_KINDS = [
+  { kind:'cactus',  label:'the cactus' },
+  { kind:'stones',  label:'the three stones' },
+  { kind:'pool',    label:'the dark pool' },
+  { kind:'log',     label:'the old log' },
+  { kind:'flower',  label:'the big flower' },
+  { kind:'bird',    label:'the sleepy bird' },
+  { kind:'anthill', label:'the anthill' },
+];
+const HAT_SEED_SALT = 0x48415421; // the desert's own stream off the daily seed
+
+function placeLandmarks(rowsArr, rnd){
+  const m = parseStage({name:'', rows: rowsArr});
+  const R = CONFIG.landmarkJunctionRadius;
+  const junctions = [];
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(!m.isOpen(c,r)) continue;
+    const deg = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx,dy])=>m.isOpen(c+dx,r+dy)).length;
+    if(deg >= 3) junctions.push({c,r});
+  }
+  if(junctions.length > LANDMARK_KINDS.length) return null; // not enough names
+  const kinds = LANDMARK_KINDS.slice();
+  for(let i=kinds.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); const t=kinds[i]; kinds[i]=kinds[j]; kinds[j]=t; }
+  const used = new Set();
+  const out = [];
+  for(const j of junctions){
+    const cand = [];
+    for(let dy=-R;dy<=R;dy++) for(let dx=-R;dx<=R;dx++){
+      if(dx===0 && dy===0) continue;
+      const c = j.c+dx, r = j.r+dy;
+      if(c<0||r<0||c>=m.cols||r>=m.rowsN) continue;
+      if(m.isOpen(c,r) || used.has(c+','+r)) continue;
+      cand.push({c, r, pri: Math.abs(dx)+Math.abs(dy)}); // orthogonal walls first
+    }
+    if(!cand.length) return null;
+    const best = Math.min(...cand.map(x=>x.pri));
+    const top = cand.filter(x=>x.pri===best);
+    const pick = top[Math.floor(rnd()*top.length)];
+    used.add(pick.c+','+pick.r);
+    const k = kinds[out.length];
+    out.push({ c:pick.c, r:pick.r, kind:k.kind, label:k.label });
+  }
+  return out;
+}
+
+function placeDecor(rowsArr, landmarks, rnd){
+  const m = parseStage({name:'', rows: rowsArr});
+  const used = new Set(landmarks.map(L=> L.c+','+L.r));
+  const walls = [];
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(!m.isOpen(c,r) && !used.has(c+','+r)) walls.push({c,r});
+  }
+  const pickFrom = (arr)=> arr[Math.floor(rnd()*arr.length)];
+  // the second hat hides near a corner of the map, as is traditional
+  const cornerish = walls.filter(({c,r})=>
+    (c<=1 || c>=m.cols-2) && (r<=2 || r>=m.rowsN-3));
+  const secondHat = pickFrom(cornerish.length? cornerish : walls);
+  const rest = walls.filter(w=> !(w.c===secondHat.c && w.r===secondHat.r));
+  const lizard = pickFrom(rest.length? rest : walls);
+  return { secondHat:{c:secondHat.c, r:secondHat.r}, lizard:{c:lizard.c, r:lizard.r} };
+}
+
+function generateHatStage(idx, dailySeedVal, params){
+  for(let a=0; a<12; a++){
+    const rows = generateStageRows(idx, hash32(dailySeedVal ^ HAT_SEED_SALT, a*7717), params);
+    if(!rows) continue; // that stream came up dry — try the next one
+    const flipped = rows.slice().reverse();
+    const rnd = mulberry32(hash32(dailySeedVal, HAT_SEED_SALT + idx*97 + a));
+    const landmarks = placeLandmarks(flipped, rnd);
+    if(landmarks){
+      return { rows: flipped, landmarks, decor: placeDecor(flipped, landmarks, rnd) };
+    }
+  }
+  return null;
+}
+
+function hatStageFor(idx){
+  const gen = generateHatStage(idx, G.runSeed, effectiveGenParams(idx));
+  if(gen) return { name:'Stage '+(idx+1), rows: gen.rows, generated:true,
+                   landmarks: gen.landmarks, decor: gen.decor };
+  return { name:'Stage '+(idx+1), rows: HAT_STAGES[idx].rows, generated:false,
+           landmarks: HAT_LANDMARKS[idx], decor: HAT_DECOR[idx] };
+}
 
 /* ---------------- Static layer dispatch ---------------------------------- */
 function buildStaticLayer(){
@@ -1731,8 +1826,8 @@ function buildStaticHat(s, rnd, m){
     if(m.isOpen(c,r)) s.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
   }
 
-  const deco = HAT_DECOR[G.stageIdx];
-  const lm = HAT_LANDMARKS[G.stageIdx];
+  const deco = m.decor || HAT_DECOR[G.stageIdx];
+  const lm = m.landmarks || HAT_LANDMARKS[G.stageIdx];
   const reserved = (c,r)=> lm.some(L=>L.c===c&&L.r===r) ||
     (deco.secondHat.c===c&&deco.secondHat.r===r) || (deco.lizard.c===c&&deco.lizard.r===r);
 
@@ -1832,11 +1927,42 @@ function drawLandmark(s, x, y, sz, kind){
     s.fillStyle = '#8F7F63';
     s.beginPath(); s.ellipse(sz*0.36, 0, sz*0.05, sz*0.1, 0, 0, Math.PI*2); s.fill();
     s.restore();
-  }else{ // dark pool
+  }else if(kind==='pool'){ // dark pool
     s.fillStyle = HPAL.pool;
     s.beginPath(); s.ellipse(x, y, sz*0.34, sz*0.22, 0, 0, Math.PI*2); s.fill();
     s.strokeStyle = HPAL.path; s.lineWidth = 1;
     s.beginPath(); s.ellipse(x, y, sz*0.34, sz*0.22, 0, 0, Math.PI*2); s.stroke();
+  }else if(kind==='flower'){ // the big flower — improbable and unremarked
+    shadowBlob(s, x, y, sz*0.2, sz*0.16);
+    s.fillStyle = '#D9A0A8';
+    for(let i=0;i<6;i++){
+      const a = i*Math.PI/3;
+      s.beginPath(); s.ellipse(x+Math.cos(a)*sz*0.16, y+Math.sin(a)*sz*0.16, sz*0.12, sz*0.08, a, 0, Math.PI*2); s.fill();
+    }
+    s.fillStyle = '#C9A034';
+    s.beginPath(); s.arc(x, y, sz*0.1, 0, Math.PI*2); s.fill();
+  }else if(kind==='bird'){ // the sleepy bird — eyes shut, like somebody else here
+    shadowBlob(s, x, y, sz*0.22, sz*0.16);
+    s.fillStyle = '#9A8A74';
+    s.beginPath(); s.ellipse(x, y+sz*0.06, sz*0.22, sz*0.17, 0, 0, Math.PI*2); s.fill();
+    s.beginPath(); s.arc(x+sz*0.16, y-sz*0.12, sz*0.11, 0, Math.PI*2); s.fill();
+    s.fillStyle = '#C9A034';
+    s.beginPath(); s.moveTo(x+sz*0.26, y-sz*0.12); s.lineTo(x+sz*0.38, y-sz*0.09); s.lineTo(x+sz*0.26, y-sz*0.05);
+    s.closePath(); s.fill();
+    s.strokeStyle = PAL.ink; s.lineWidth = 1; s.globalAlpha = 0.6;
+    s.beginPath(); s.arc(x+sz*0.18, y-sz*0.14, sz*0.03, 0.2, Math.PI-0.2); s.stroke(); // a closed eye
+    s.globalAlpha = 1;
+  }else{ // anthill — industrious neighbours
+    shadowBlob(s, x, y, sz*0.24, sz*0.14);
+    s.fillStyle = '#C4A87E';
+    s.beginPath(); s.ellipse(x, y, sz*0.26, sz*0.18, 0, 0, Math.PI*2); s.fill();
+    s.fillStyle = '#8F7658';
+    s.beginPath(); s.arc(x, y, sz*0.07, 0, Math.PI*2); s.fill();
+    s.fillStyle = PAL.ink; s.globalAlpha = 0.5;
+    [[0.3,0.1],[0.38,0.2],[-0.32,0.16],[0.1,0.32]].forEach(([ax,ay])=>{
+      s.fillRect(x+ax*sz, y+ay*sz, 1.5, 1.5);
+    });
+    s.globalAlpha = 1;
   }
 }
 function drawHatIcon(s, x, y, r){ // the hat from above: concentric and proud
@@ -1924,7 +2050,7 @@ function drawWatcher(now){
 }
 
 function drawLizard(now){
-  const L = HAT_DECOR[G.stageIdx].lizard;
+  const L = (G.maze.decor || HAT_DECOR[G.stageIdx]).lizard;
   const p = cellCenter(L.c, L.r);
   const s = cs*0.32;
   ctx.save();
@@ -1975,7 +2101,7 @@ function drawFootprints(){
   // landmark names, tiny and sentence-case — the reveal teaches the words
   ctx.fillStyle = PAL.ink; ctx.font = '600 10px -apple-system, ui-rounded, system-ui, sans-serif';
   ctx.textAlign = 'center';
-  HAT_LANDMARKS[G.stageIdx].forEach(L=>{
+  (G.maze.landmarks || HAT_LANDMARKS[G.stageIdx]).forEach(L=>{
     const p = cellCenter(L.c, L.r);
     ctx.fillText(L.label, p.x, Math.min(H-botH-4, p.y + cs*0.75));
   });
@@ -2252,6 +2378,7 @@ requestAnimationFrame(frame);
 // exposed for the tuning panel & automated tests
 window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
   dailySeed, generateStageRows, validateStage, solveMaze, chooseWorld,
+  generateHatStage, placeLandmarks, LANDMARK_KINDS,
   advanceStreak, currentStreak, effectiveGenParams, dayNumber };
 </script>
 </body>
