@@ -146,9 +146,10 @@ const CONFIG_DEFAULTS = {
   junctionPauseMs: 0,       // 0 = wait forever (v1 default); >0 = timed window
   bumpBouncePx: 24,         // comedy bounce distance
   bumpStunMs: 900,          // pause after bump/bonk before re-offering the junction
-  // maze generation (v2+ — unused by v1 hand-authored stages)
+  // maze generation (v2)
   stageJunctions: [2, 4, 6],
-  stageDeadEnds: [1, 2, 3],
+  stageDeadEnds: [1, 2, 3],     // how many dead-end arms are deep (all junctions grow one arm)
+  stageChordShare: [0, 0.4, 0.5], // fraction of junctions where the answer is the chord
   mazeCols: 9, mazeRows: 12,
   gemCount: 2, gemDeadEndBias: 0.7,
   // overworld generation (v2.5+)
@@ -226,13 +227,12 @@ const PAL = {
   spade:    '#8A8378',
 };
 
-/* ---------------- Hand-authored v1 stages --------------------------------
+/* ---------------- Hand-authored fallback stages ---------------------------
    '#' = soil, '.' = tunnel corridor, 'S' = start (dig down), 'E' = breakthrough.
-   Screen-direction invariant: junctions occur only on vertical runs, so the
-   answer is always green (screen-left), red (screen-right) or the chord
-   (straight on). Horizontal corridors contain corners only.
-   Ramp: 2 junctions → 4 (chords appear) → 6 (chords + tempting shaft).     */
-const STAGES = [
+   These are the shipped v1 mazes. They stay in the file permanently: the
+   generator falls back to them if it ever fails, and they serve as
+   regression fixtures. The pair must never see a broken maze.             */
+const FALLBACK_STAGES = [
   { name:'Stage 1', rows:[   // green, red — pure side-to-side T's
     '####S####',
     '####.####',
@@ -280,6 +280,261 @@ const STAGES = [
     '####E####',
   ]},
 ];
+
+/* ---------------- Daily seed ----------------------------------------------
+   Every calendar day generates the same three tunnels for everyone,
+   replayable all day for personal best. seedOverride forces a seed.       */
+function hash32(a, b){
+  let h = 2166136261 >>> 0;
+  h ^= a >>> 0; h = Math.imul(h, 16777619); h ^= h >>> 13;
+  h ^= b >>> 0; h = Math.imul(h, 16777619); h ^= h >>> 13;
+  return h >>> 0;
+}
+function dailySeed(){
+  if(CONFIG.seedOverride !== null && CONFIG.seedOverride !== ''){
+    return Number(CONFIG.seedOverride) >>> 0;
+  }
+  const d = new Date(); // device-local: "today" is the family's today
+  return hash32(d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate(), 0x9E3779B9);
+}
+
+/* ---------------- Procedural stage generation (M1) ------------------------
+   Builds a maze as a descending spine of vertical runs. Junctions are
+   placed ONLY on vertical travel — the screen-direction invariant holds by
+   construction, not by luck. Each junction grows exactly one dead-end arm
+   (T's: route turns left/right, arm on the other side; chords: route
+   continues straight down, arm to one side). A carve-time adjacency rule —
+   a new cell may touch only its predecessor — guarantees the corridor
+   graph is a tree: no loops, no accidental junctions, no horizontal
+   junction ever. The validator below re-checks all of it independently.  */
+
+function tryCarve(cols, rows, J, deepTarget, chordShare, rnd){
+  const grid = Array.from({length: rows}, ()=> Array(cols).fill('#'));
+  const canCarve = (c,r,pc,pr)=>{
+    if(c<0 || r<0 || c>=cols || r>=rows) return false;
+    if(grid[r][c] !== '#') return false;
+    const nb = [[1,0],[-1,0],[0,1],[0,-1]];
+    for(const [dx,dy] of nb){
+      const nc=c+dx, nr=r+dy;
+      if(nc===pc && nr===pr) continue;
+      if(nc<0||nr<0||nc>=cols||nr>=rows) continue;
+      if(grid[nr][nc] !== '#') return false;
+    }
+    return true;
+  };
+  const carve = (c,r)=>{ grid[r][c]='.'; };
+
+  // which junction arms get to be deep (tempting) rather than one-cell stubs
+  const deepIdx = new Set();
+  const order = Array.from({length:J}, (_,i)=>i);
+  for(let i=order.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); const t=order[i]; order[i]=order[j]; order[j]=t; }
+  for(let i=0;i<Math.min(deepTarget, J);i++) deepIdx.add(order[i]);
+
+  // entry shaft from the surface
+  const c0 = 2 + Math.floor(rnd()*(cols-4));
+  let c = c0, r = 0;
+  carve(c, 0);
+  const startRun = Math.min(2 + (rnd()<0.5?1:0), rows-2-J);
+  if(startRun < 1) return null;
+  for(let i=1;i<=startRun;i++){ if(!canCarve(c,i,c,i-1)) return null; carve(c,i); }
+  r = startRun;
+
+  const growArm = (jc, jr, side, want)=>{ // returns cells actually carved (0 = blocked)
+    let got = 0;
+    for(let a=1;a<=want;a++){
+      if(canCarve(jc+side*a, jr, jc+side*(a-1), jr)) got = a; else break;
+    }
+    for(let a=1;a<=got;a++) carve(jc+side*a, jr);
+    return got;
+  };
+
+  // type quota: successful attempts contain EXACTLY the configured chord
+  // share — a junction that can't fit its shape borrows from the other
+  // quota, and if the quotas can't be honoured the attempt is discarded
+  let chordsLeft = Math.round(J * chordShare);
+  let tsLeft = J - chordsLeft;
+
+  for(let ji=0; ji<J; ji++){
+    const junLeft = J - ji - 1;
+    const vMax = Math.min(2, rows-2 - junLeft - r);
+    if(vMax < 1) return null;
+    const armWant = deepIdx.has(ji)? 2 + (rnd()<0.4?1:0) : 1;
+    const snap = ()=> grid.map(row=>row.slice());
+    const restore = (s)=>{ for(let i2=0;i2<rows;i2++) grid[i2]=s[i2]; };
+
+    // chord junction: route continues straight down, arm tempts to one side
+    const doChord = ()=>{
+      const s0 = snap();
+      const s = rnd()<0.5? 1 : -1;
+      if(growArm(c, r, s, armWant) < 1 && growArm(c, r, -s, armWant) < 1){ restore(s0); return false; }
+      const V = 1 + Math.floor(rnd()*vMax);
+      let v = 0;
+      for(let k=1;k<=V;k++){ if(canCarve(c, r+k, c, r+k-1)) v = k; else break; }
+      if(v < 1){ restore(s0); return false; }
+      for(let k=1;k<=v;k++) carve(c, r+k);
+      r += v;
+      return true;
+    };
+
+    // T junction: down blocked, route turns one way, dead arm the other.
+    // Try the roomier side first — T's fail mostly from column crowding.
+    const doT = ()=>{
+      const room = (side)=>{
+        let n = 0;
+        for(let a=1;a<=4;a++){
+          const cc = c + side*a;
+          if(cc<0 || cc>=cols || grid[r][cc] !== '#') break;
+          n = a;
+        }
+        return n;
+      };
+      const rl = room(-1), rr = room(1);
+      const firstSide = rl===rr? (rnd()<0.5? 1 : -1) : (rl>rr? -1 : 1);
+      for(const rs of [firstSide, -firstSide]){
+        const s0 = snap();
+        const L = 2 + Math.floor(rnd()*2);
+        let routed = 0;
+        for(let a=1;a<=L;a++){
+          if(canCarve(c+rs*a, r, c+rs*(a-1), r)) routed = a; else break;
+        }
+        if(routed < 1){ restore(s0); continue; } // even a 1-cell route corners fine
+        for(let a=1;a<=routed;a++) carve(c+rs*a, r);
+        const c2 = c + rs*routed;
+        const V = 1 + Math.floor(rnd()*vMax);
+        let v = 0;
+        for(let k=1;k<=V;k++){ if(canCarve(c2, r+k, c2, r+k-1)) v = k; else break; }
+        if(v < 1 || growArm(c, r, -rs, armWant) < 1){ restore(s0); continue; }
+        for(let k=1;k<=v;k++) carve(c2, r+k);
+        c = c2; r += v;
+        return true;
+      }
+      return false;
+    };
+
+    // draw the type from the remaining quota (stage 1's quota is 0 chords,
+    // so the teaching stage stays green/red-only by construction)
+    const preferChord = chordsLeft > 0 &&
+      (tsLeft === 0 || rnd() < chordsLeft/(chordsLeft + tsLeft));
+    let placed = false;
+    if(preferChord){
+      if(doChord()){ chordsLeft--; placed = true; }
+      else if(tsLeft > 0 && doT()){ tsLeft--; placed = true; }
+    }else{
+      if(doT()){ tsLeft--; placed = true; }
+      else if(chordsLeft > 0 && doChord()){ chordsLeft--; placed = true; }
+    }
+    if(!placed) return null;
+  }
+
+  // final descent to the breakthrough
+  for(let k=r+1;k<rows;k++){ if(!canCarve(c,k,c,k-1)) return null; carve(c,k); }
+  grid[0][c0] = 'S';
+  grid[rows-1][c] = 'E';
+  return grid.map(row=>row.join(''));
+}
+
+function generateStageRows(stageIdx, baseSeed){
+  const J = CONFIG.stageJunctions[stageIdx];
+  const deep = CONFIG.stageDeadEnds[stageIdx];
+  const chordShare = CONFIG.stageChordShare[stageIdx];
+  for(let attempt=0; attempt<120; attempt++){
+    const rnd = mulberry32(hash32(baseSeed, stageIdx*131071 + attempt*977));
+    const rows = tryCarve(CONFIG.mazeCols, CONFIG.mazeRows, J, deep, chordShare, rnd);
+    if(rows && validateStage(rows, J).ok) return rows;
+  }
+  return null; // caller falls back to the hand-authored stage
+}
+
+/* Independent re-check of everything the generator promises. Written to be
+   trustable on its own: it never looks at how the maze was made.          */
+function validateStage(rowsArr, expectedJunctions){
+  const m = parseStage({name:'', rows:rowsArr});
+  const issues = [];
+  const cells = [];
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++) if(m.isOpen(c,r)) cells.push({c,r});
+  if(!m.start || m.start.r !== 0) issues.push('start is not on the surface');
+  if(!m.exit || m.exit.r !== m.rowsN-1) issues.push('exit is not at the bottom');
+  if(issues.length) return {ok:false, issues};
+
+  // connectivity + arrival directions via BFS from the start
+  const ck = (c,r)=> c+','+r;
+  const parent = new Map([[ck(m.start.c, m.start.r), null]]);
+  const queue = [m.start];
+  while(queue.length){
+    const cur = queue.shift();
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nc=cur.c+dx, nr=cur.r+dy;
+      if(m.isOpen(nc,nr) && !parent.has(ck(nc,nr))){
+        parent.set(ck(nc,nr), cur);
+        queue.push({c:nc, r:nr});
+      }
+    }
+  }
+  if(parent.size !== cells.length) issues.push('maze is not fully connected');
+
+  let edges = 0;
+  cells.forEach(({c,r})=>{ if(m.isOpen(c+1,r)) edges++; if(m.isOpen(c,r+1)) edges++; });
+  if(edges !== cells.length-1) issues.push('maze contains a loop');
+
+  let jCount = 0, leaves = 0;
+  cells.forEach(cell=>{
+    const deg = [[1,0],[-1,0],[0,1],[0,-1]]
+      .filter(([dx,dy])=> m.isOpen(cell.c+dx, cell.r+dy)).length;
+    if(deg >= 3){
+      jCount++;
+      if(deg > 3) issues.push('4-way junction at '+cell.c+','+cell.r);
+      const p = parent.get(ck(cell.c, cell.r));
+      if(!p || p.c !== cell.c) issues.push('junction entered horizontally at '+cell.c+','+cell.r);
+    }
+    if(deg === 1 && !(cell.c===m.start.c && cell.r===m.start.r)
+                 && !(cell.c===m.exit.c && cell.r===m.exit.r)) leaves++;
+  });
+  if(jCount !== expectedJunctions) issues.push('junction count '+jCount+' != '+expectedJunctions);
+  if(leaves !== jCount) issues.push('dead-end count '+leaves+' != junction count '+jCount);
+  return {ok: issues.length===0, issues};
+}
+
+/* Oracle solver: the correct green/red/both call at every junction, in
+   order. Used by the automated tests, never by the game itself.           */
+function solveMaze(rowsArr){
+  const m = parseStage({name:'', rows:rowsArr});
+  const ck = (c,r)=> c+','+r;
+  const parent = new Map([[ck(m.start.c, m.start.r), null]]);
+  const queue = [m.start];
+  while(queue.length){
+    const cur = queue.shift();
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nc=cur.c+dx, nr=cur.r+dy;
+      if(m.isOpen(nc,nr) && !parent.has(ck(nc,nr))){
+        parent.set(ck(nc,nr), cur);
+        queue.push({c:nc, r:nr});
+      }
+    }
+  }
+  const path = [];
+  let cur = {...m.exit};
+  while(cur){ path.push(cur); cur = parent.get(ck(cur.c, cur.r)); }
+  path.reverse();
+  const presses = [];
+  for(let i=1;i<path.length-1;i++){
+    const cell = path[i];
+    const entered = { dx: cell.c-path[i-1].c, dy: cell.r-path[i-1].r };
+    const opts = [entered, turnLeft(entered), turnRight(entered)]
+      .filter(d=> m.isOpen(cell.c+d.dx, cell.r+d.dy));
+    if(opts.length > 1){
+      const need = { dx: path[i+1].c-cell.c, dy: path[i+1].r-cell.r };
+      presses.push(need.dx===-1? 'left' : need.dx===1? 'right' : 'both');
+    }
+  }
+  return presses;
+}
+
+function stageRowsFor(idx){
+  const gen = generateStageRows(idx, G.runSeed);
+  if(gen) return { name:'Stage '+(idx+1), rows:gen, generated:true };
+  const fb = FALLBACK_STAGES[idx];
+  return { name: fb.name, rows: fb.rows, generated:false };
+}
 
 /* ---------------- Tiny seeded PRNG for decorative dirt ------------------- */
 function mulberry32(seed){
@@ -378,6 +633,8 @@ function parseStage(stage){
   }));
   return {
     name: stage.name,
+    rows: stage.rows,
+    generated: stage.generated === true,
     grid,
     cols: grid[0].length,
     rowsN: grid.length,
@@ -394,6 +651,7 @@ const PLAY_PHASES = new Set(['digging','junction','stunned','bouncing']);
 const G = {
   phase: 'briefing',   // briefing | countdown | digging | junction | stunned | bouncing | breakthrough | reveal | runComplete
   stageIdx: 0,
+  runSeed: 0,          // the daily seed this run was generated from
   maze: null,
   cell: null,          // current grid cell {c,r}
   heading: DIRS.down,
@@ -460,7 +718,8 @@ function buildStaticLayer(){
   staticLayer.width = canvas.width; staticLayer.height = canvas.height;
   const s = staticLayer.getContext('2d');
   s.setTransform(DPR,0,0,DPR,0,0);
-  const rnd = mulberry32((G.stageIdx+1)*7919);
+  // decorative dirt varies with the day, deterministically
+  const rnd = mulberry32(hash32(G.runSeed, (G.stageIdx+1)*7919));
 
   // sky strip — quiet, pale, a thin picture-book world above
   s.fillStyle = PAL.sky; s.fillRect(0,0,W,skyH);
@@ -623,7 +882,7 @@ function key(cell){ return cell.c+','+cell.r; }
 
 function setupStage(idx){
   G.stageIdx = idx;
-  G.maze = parseStage(STAGES[idx]);
+  G.maze = parseStage(stageRowsFor(idx));
   G.cell = {...G.maze.start};
   G.heading = DIRS.down;
   G.moveFrom = null; G.moveTo = null; G.moveT = 0;
@@ -792,6 +1051,14 @@ function finishRun(){
   if(best.fastestMs===null || tot.time < best.fastestMs){ best.fastestMs = tot.time; badges.push('Fastest run yet!'); }
   if(best.fewestBumps===null || tot.bumps < best.fewestBumps){ best.fewestBumps = tot.bumps; badges.push('Smoothest run yet!'); }
   LS.set('best', best);
+  // today's tunnels are replayable all day — track the daily seed's best too
+  const sbKey = 'seedbest:'+G.runSeed;
+  const sb = LS.get(sbKey, {fastestMs:null, fewestBumps:null});
+  let bestToday = false;
+  if(sb.fastestMs===null || tot.time < sb.fastestMs){ sb.fastestMs = tot.time; bestToday = true; }
+  if(sb.fewestBumps===null || tot.bumps < sb.fewestBumps){ sb.fewestBumps = tot.bumps; bestToday = true; }
+  LS.set(sbKey, sb);
+  if(bestToday && badges.length===0) badges.push('Best today!');
   const runs = (LS.get('runs', 0)) + 1;
   LS.set('runs', runs);
   releaseWake();
@@ -802,7 +1069,9 @@ function finishRun(){
     '<p class="vocab">Snack time!</p>'+
     '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' bumps &#9733;</p>'+
     (badges.length? badges.map(x=>'<span class="badge">'+x+'</span>').join('') : '')+
-    '<p class="dim">Best: '+fmtTime(best.fastestMs)+' &middot; smoothest '+best.fewestBumps+' bumps<br>Runs together: '+runs+'</p>'+
+    '<p class="dim">Today: '+fmtTime(sb.fastestMs)+' &middot; '+sb.fewestBumps+' bumps'+
+    '<br>Best ever: '+fmtTime(best.fastestMs)+' &middot; smoothest '+best.fewestBumps+' bumps'+
+    '<br>Runs together: '+runs+'</p>'+
     '<p class="hint">Hold both buttons together to dig again</p>'
   );
 }
@@ -814,6 +1083,7 @@ function nextAfterReveal(){
 
 function newRun(){
   G.stageTimes = []; G.stageBumpCounts = [];
+  G.runSeed = dailySeed(); // re-read: a run started after midnight gets the new day
   setupStage(0);
 }
 
@@ -1293,6 +1563,7 @@ function drawDebug(){
   for(let c=0;c<=m.cols;c++){ ctx.beginPath(); ctx.moveTo(ox+c*cs, oy); ctx.lineTo(ox+c*cs, oy+m.rowsN*cs); ctx.stroke(); }
   ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
   ctx.fillText('phase: '+G.phase+'  cell: '+key(G.cell)+'  hdg: '+G.heading.dx+','+G.heading.dy, 8, H-8);
+  ctx.fillText('seed: '+G.runSeed+'  '+(G.maze.generated? 'generated':'FALLBACK'), 8, H-20);
 }
 
 /* ---------------- HUD & panels ------------------------------------------- */
@@ -1303,7 +1574,7 @@ function fmtTime(ms){
 }
 function updateHUD(){
   const inPlay = PLAY_PHASES.has(G.phase) || G.phase==='countdown';
-  document.getElementById('hudStage').textContent = STAGES[G.stageIdx].name+' of 3';
+  document.getElementById('hudStage').textContent = 'Stage '+(G.stageIdx+1)+' of 3';
   document.getElementById('hudTime').textContent = (inPlay || G.phase==='breakthrough')? fmtTime(G.stageMs) : '';
   document.getElementById('hudBumps').textContent = (inPlay && G.bumps.length)? '★ '+G.bumps.length : '';
 }
@@ -1317,7 +1588,7 @@ function showBriefing(){
     '<p class="hint">Tip: turn on Do Not Disturb &mdash; the Driver can\'t see notifications coming</p>';
   dndNudgeShown = true;
   showPanel(
-    '<h1>'+STAGES[G.stageIdx].name+' of 3</h1>'+
+    '<h1>Stage '+(G.stageIdx+1)+' of 3</h1>'+
     '<p>Make a plan together!</p>'+
     '<p class="vocab"><b class="g">Green</b> is left &middot; <b class="r">Red</b> is right<br>Both together is straight on (&ldquo;keep going!&rdquo;)</p>'+
     dnd+
@@ -1473,6 +1744,7 @@ function applyConfigCosmetics(){
 
 /* ---------------- Boot ---------------------------------------------------- */
 applyConfigCosmetics();
+G.runSeed = dailySeed();
 setupStage(0);
 
 function frame(now){
@@ -1486,7 +1758,8 @@ function frame(now){
 requestAnimationFrame(frame);
 
 // exposed for the tuning panel & automated tests
-window.TUNNELS = { G, CONFIG, STAGES, setupStage };
+window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, setupStage,
+  dailySeed, generateStageRows, validateStage, solveMaze };
 </script>
 </body>
 </html>

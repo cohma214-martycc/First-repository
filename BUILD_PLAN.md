@@ -25,8 +25,11 @@ code — v2's job is to catch up with reality.
 
 ## Milestones (each independently shippable, in order)
 
-### M1 — Daily seed + procedural tunnel generation (v2)
+### M1 — Daily seed + procedural tunnel generation (v2) — **SHIPPED**
 The backbone. Everything later hangs off this.
+Shipped notes: 200-seed sweep passes at 100% generated/validated/solvable;
+chord mix is a hard per-stage quota (stage 1 provably green/red-only);
+per-seed "today's best" landed here too. `stageChordShare` joined CONFIG.
 - Date → seed: local calendar date string (YYYY-MM-DD) hashed to a 32-bit
   seed; `seedOverride` bypasses for testing. Same seed → same three stages
   for everyone, replayable all day for personal best.
