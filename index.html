@@ -590,9 +590,8 @@ function effectiveGenParams(stageIdx){
   return { J, deep, chordShare: CONFIG.stageChordShare[stageIdx], rows };
 }
 
-function effectiveDigSpeed(){
-  const notch = currentStreak().notch;
-  return CONFIG.digSpeed * (notch >= 4 ? CONFIG.streakSpeedMult : 1);
+function speedWithNotch(base){
+  return base * (currentStreak().notch >= 4 ? CONFIG.streakSpeedMult : 1);
 }
 
 /* ---------------- Tiny seeded PRNG for decorative dirt ------------------- */
@@ -735,6 +734,7 @@ const G = {
   dogFacing: 1, dogPrev: null,
   treasure: [],        // decorative gems/gold in the walls — never collectible
   snackT: 0,           // run-complete snack scene timer
+  watcherAng: -Math.PI/2, // the Watcher tortoise's slow head
   particles: [],
   bothArmed: true,     // require full release between both-press triggers
   totals(){ return {
@@ -782,8 +782,10 @@ const WORLDS = {
   tunnels: {
     label: 'Tunnels',
     companion: true,   // the dog
+    bumpNoun: 'Bumps',
     bumpDry: false,
-    speed: ()=> effectiveDigSpeed(),
+    dust: '#6B4F35', burst: ['#6B4F35','#C9A876'],
+    speed: ()=> speedWithNotch(CONFIG.digSpeed),
     stageFor: (idx)=> stageRowsFor(idx),
     topStrip: ()=> Math.max(44, Math.round(H*0.12)),   // the sky
     bottomStrip: ()=> 0,
@@ -799,8 +801,64 @@ const WORLDS = {
     drawAvatar: (x, y, now)=> drawDigger(x, y, now),
     drawCelebration: ()=>{},                            // snack scene is shared
   },
+
+  /* World Two — THE HAT. Bird's-eye desert; the Watcher calls, the Seeker
+     plods, the hat waits in plain view. Same buttons, same grammar. */
+  hat: {
+    label: 'The Hat',
+    companion: false,  // no dog in the desert (a lizard suns itself instead)
+    bumpNoun: 'Bonks',
+    bumpDry: true,     // shell-bonks: same family, drier
+    dust: '#CBB78E', burst: ['#CBB78E','#EADDBA'],
+    speed: ()=> speedWithNotch(CONFIG.walkSpeed),       // tortoise-slow is the joke
+    stageFor: (idx)=> ({ name:'Stage '+(idx+1), rows: HAT_STAGES[idx].rows, generated:false }),
+    topStrip: ()=> 10,
+    bottomStrip: ()=> Math.max(52, Math.round(H*0.14)), // the Watcher's rock
+    buildStatic: (s, rnd, m)=> buildStaticHat(s, rnd, m),
+    drawExtras: (now)=>{ if(CONFIG.showLizard) drawLizard(now); drawWatcher(now); },
+    drawExitMarker: (now)=> drawHatPulse(now),
+    drawTrail: ()=> drawFootprints(),
+    drawWaiting: (now)=>{
+      const s0 = cellCenter(G.maze.start.c, G.maze.start.r);
+      drawSeeker(s0.x, s0.y, now);
+      drawWatcher(now);
+    },
+    drawAvatar: (x, y, now)=> drawSeeker(x, y, now),
+    drawCelebration: (now)=> drawSunset(now),
+  },
 };
 function WORLD(){ return WORLDS[G.world]; }
+
+/* ---------------- World Two data ------------------------------------------
+   H1 stages are vertical flips of the hand-authored tunnel fixtures: the
+   Seeker starts at the bottom edge and walks up-screen to the hat. A flip
+   preserves every invariant (junctions stay on vertical travel; green/red
+   stay green/red — only rows reverse).                                    */
+const HAT_STAGES = FALLBACK_STAGES.map(st=> ({ name: st.name, rows: st.rows.slice().reverse() }));
+
+/* Nameable landmarks, hand-placed beside junctions so "green at the
+   cactus!" is always possible. Labels appear only on the reveal spread.   */
+const HAT_LANDMARKS = [
+  [ {c:4,r:5,kind:'cactus', label:'the cactus'},
+    {c:2,r:2,kind:'stones', label:'the three stones'},
+    {c:6,r:8,kind:'log',    label:'the old log'},
+    {c:7,r:4,kind:'pool',   label:'the dark pool'} ],
+  [ {c:6,r:8,kind:'cactus', label:'the cactus'},
+    {c:6,r:2,kind:'stones', label:'the three stones'},
+    {c:1,r:7,kind:'pool',   label:'the dark pool'},
+    {c:8,r:3,kind:'log',    label:'the old log'} ],
+  [ {c:4,r:12,kind:'cactus', label:'the cactus'},
+    {c:3,r:6, kind:'stones', label:'the three stones'},
+    {c:1,r:3, kind:'pool',   label:'the dark pool'},
+    {c:2,r:0, kind:'log',    label:'the old log'} ],
+];
+
+/* Silent jokes: a second hat half-buried in a corner, a lizard on a rock. */
+const HAT_DECOR = [
+  { secondHat:{c:1,r:1},  lizard:{c:7,r:7} },
+  { secondHat:{c:1,r:11}, lizard:{c:1,r:1} },
+  { secondHat:{c:7,r:15}, lizard:{c:6,r:11} },
+];
 
 /* ---------------- Static layer dispatch ---------------------------------- */
 function buildStaticLayer(){
@@ -1132,7 +1190,7 @@ function showReveal(){
   G.stageBumpCounts.push(G.bumps.length);
   showPanel(
     '<h1>You made it!</h1>'+
-    '<p>Time '+fmtTime(G.stageMs)+' &middot; Bumps '+G.bumps.length+' &#9733;</p>'+
+    '<p>Time '+fmtTime(G.stageMs)+' &middot; '+WORLD().bumpNoun+' '+G.bumps.length+' &#9733;</p>'+
     (G.stageIdx<2
       ? '<p class="hint">Hold both buttons together for the next stage</p>'
       : '<p class="hint">Hold both buttons together to finish the run</p>')
@@ -1166,7 +1224,7 @@ function finishRun(){
     '<h1>You made it!</h1>'+
     '<p class="vocab">Snack time!</p>'+
     '<p class="vocab">Day '+streak.count+' of digging together</p>'+
-    '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' bumps &#9733;</p>'+
+    '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' '+WORLD().bumpNoun.toLowerCase()+' &#9733;</p>'+
     (badges.length? badges.map(x=>'<span class="badge">'+x+'</span>').join('') : '')+
     '<p class="dim">Today: '+fmtTime(sb.fastestMs)+' &middot; '+sb.fewestBumps+' bumps'+
     '<br>Best ever: '+fmtTime(best.fastestMs)+' &middot; smoothest '+best.fewestBumps+' bumps'+
@@ -1217,7 +1275,7 @@ function dustPuff(){
     const a = Math.random()*Math.PI*2, sp = 20+Math.random()*60;
     G.particles.push({ x:p.x+G.heading.dx*cs*0.4, y:p.y+G.heading.dy*cs*0.4,
       vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-30, life:0.5+Math.random()*0.3,
-      size:cs*(0.08+Math.random()*0.1), color:PAL.soilWarm });
+      size:cs*(0.08+Math.random()*0.1), color:WORLD().dust });
   }
 }
 
@@ -1226,9 +1284,10 @@ function breakthroughParticles(){
   const n = reducedMotion? 6 : 26;
   for(let i=0;i<n;i++){
     const a = Math.random()*Math.PI*2, sp = 40+Math.random()*140;
+    const cols = WORLD().burst;
     G.particles.push({ x:p.x, y:p.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-80,
       life:0.7+Math.random()*0.6, size:cs*(0.1+Math.random()*0.18),
-      color: Math.random()<0.5? PAL.soilWarm : PAL.tunnel });
+      color: cols[Math.floor(Math.random()*cols.length)] });
   }
 }
 
@@ -1281,6 +1340,13 @@ function update(dt){
   }
   else if(G.phase==='runComplete'){
     G.snackT += dt;
+  }
+  else if(G.phase==='picker' && G.pendingSide){
+    G.pendingMs += dt;
+    if(G.pendingMs >= CONFIG.chordWindowMs){
+      const side = G.pendingSide;
+      chooseWorld(side==='left'? 'tunnels' : 'hat');
+    }
   }
 
   if(G.shakeT>0) G.shakeT -= dt;
@@ -1385,11 +1451,7 @@ function drawPathTrace(){
   });
   ctx.stroke();
   ctx.globalAlpha = 1;
-  // a little star for every thud — the laugh-together markers
-  G.bumps.forEach(b=>{
-    const p = cellCenter(b.c, b.r);
-    drawStar(p.x, p.y, cs*0.28, PAL.paper, PAL.ink);
-  });
+  drawBumpStars(); // a little star for every thud — the laugh-together markers
 }
 
 function drawStar(x, y, r, fill, stroke){
@@ -1651,6 +1713,308 @@ function roundedRect(x,y,w,h,r){
   ctx.closePath(); ctx.fill();
 }
 
+/* ================= World Two — THE HAT: desert drawing =================== */
+const HPAL = {
+  sand:'#DCC9A0', path:'#EADDBA', scrub:'#8A9B6E', scrubDark:'#6F815A',
+  boulder:'#A79C88', log:'#B0A183', pool:'#5E7876', stone:'#B9AE97',
+  shadow:'rgba(60,50,35,0.18)', shell:'#7A8560', shellDark:'#5F6A4A',
+  neck:'#8A9467', foot:'#6F7A55', rock:'#B4A88F',
+};
+
+function buildStaticHat(s, rnd, m){
+  G.treasure = []; // no buried fortunes here — the joke is a second hat
+  s.fillStyle = HPAL.sand; s.fillRect(0,0,W,H);
+
+  // walkable sand paths, pale and trodden
+  s.fillStyle = HPAL.path;
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(m.isOpen(c,r)) s.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
+  }
+
+  const deco = HAT_DECOR[G.stageIdx];
+  const lm = HAT_LANDMARKS[G.stageIdx];
+  const reserved = (c,r)=> lm.some(L=>L.c===c&&L.r===r) ||
+    (deco.secondHat.c===c&&deco.secondHat.r===r) || (deco.lizard.c===c&&deco.lizard.r===r);
+
+  // impassable scrub — flat shapes, single flat shadows cast to one side
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(m.isOpen(c,r) || reserved(c,r)) continue;
+    if(rnd() < 0.18) continue; // the occasional gap of bare sand
+    const x = ox+c*cs+cs/2, y = oy+r*cs+cs/2;
+    const kind = rnd();
+    if(kind < 0.45) drawBush(s, x, y, cs, rnd);
+    else if(kind < 0.7) drawBoulder(s, x, y, cs, rnd);
+    else if(kind < 0.85) drawPricklyPear(s, x, y, cs, rnd);
+    else drawDune(s, x, y, cs, rnd);
+  }
+
+  // landmarks — bigger, distinct, nameable
+  lm.forEach(L=> drawLandmark(s, ox+L.c*cs+cs/2, oy+L.r*cs+cs/2, cs, L.kind));
+
+  // the second hat, half-buried, never acknowledged
+  if(CONFIG.buriedSecondHat){
+    const sh = deco.secondHat;
+    const x = ox+sh.c*cs+cs/2, y = oy+sh.r*cs+cs/2;
+    s.fillStyle = PAL.gem; s.globalAlpha = 0.8;
+    s.beginPath(); s.ellipse(x, y+cs*0.1, cs*0.3, cs*0.12, 0.2, Math.PI, 0, true); s.fill();
+    s.globalAlpha = 1;
+  }
+
+  // a rock for the lizard to sun on
+  drawBoulder(s, ox+deco.lizard.c*cs+cs/2, oy+deco.lizard.r*cs+cs/2, cs, rnd);
+
+  // THE HAT — visible from the very first frame
+  const e = m.exit;
+  drawHatIcon(s, ox+e.c*cs+cs/2, oy+e.r*cs+cs/2, cs*0.42);
+
+  // the Watcher's rock (the tortoise itself is drawn live — it turns its head)
+  s.fillStyle = HPAL.shadow;
+  s.beginPath(); s.ellipse(W*0.5+botH*0.12, H-botH*0.38, botH*0.85, botH*0.32, 0, 0, Math.PI*2); s.fill();
+  s.fillStyle = HPAL.rock;
+  s.beginPath(); s.ellipse(W*0.5, H-botH*0.45, botH*0.8, botH*0.34, 0, 0, Math.PI*2); s.fill();
+
+  // paper grain
+  s.globalAlpha = 0.05;
+  for(let i=0;i<W*H/160;i++){
+    s.fillStyle = rnd()<0.5? '#000':'#fff';
+    s.fillRect(rnd()*W, rnd()*H, 1, 1);
+  }
+  s.globalAlpha = 1;
+}
+
+function shadowBlob(s, x, y, rx, ry){
+  s.fillStyle = HPAL.shadow;
+  s.beginPath(); s.ellipse(x+rx*0.35, y+ry*0.45, rx, ry*0.8, 0, 0, Math.PI*2); s.fill();
+}
+function drawBush(s, x, y, sz, rnd){
+  const r = sz*(0.28+rnd()*0.1);
+  shadowBlob(s, x, y, r, r);
+  s.fillStyle = HPAL.scrub;
+  s.beginPath(); s.ellipse(x, y, r, r*0.85, 0, 0, Math.PI*2); s.fill();
+  s.fillStyle = HPAL.scrubDark;
+  s.beginPath(); s.ellipse(x-r*0.3, y+r*0.2, r*0.4, r*0.3, 0, 0, Math.PI*2); s.fill();
+}
+function drawBoulder(s, x, y, sz, rnd){
+  const r = sz*(0.26+rnd()*0.1);
+  shadowBlob(s, x, y, r, r);
+  s.fillStyle = HPAL.boulder;
+  s.beginPath(); s.ellipse(x, y, r, r*0.8, rnd()*0.6, 0, Math.PI*2); s.fill();
+}
+function drawPricklyPear(s, x, y, sz, rnd){
+  const r = sz*0.2;
+  shadowBlob(s, x, y, r*1.4, r);
+  s.fillStyle = HPAL.scrubDark;
+  s.beginPath(); s.ellipse(x-r*0.5, y, r*0.8, r, 0.4, 0, Math.PI*2); s.fill();
+  s.beginPath(); s.ellipse(x+r*0.5, y-r*0.3, r*0.7, r*0.9, -0.4, 0, Math.PI*2); s.fill();
+}
+function drawDune(s, x, y, sz, rnd){
+  s.fillStyle = 'rgba(60,50,35,0.08)';
+  s.beginPath(); s.ellipse(x, y+sz*0.1, sz*0.4, sz*0.14, 0, 0, Math.PI); s.fill();
+}
+function drawLandmark(s, x, y, sz, kind){
+  if(kind==='cactus'){
+    shadowBlob(s, x, y+sz*0.1, sz*0.3, sz*0.2);
+    s.strokeStyle = HPAL.scrubDark; s.lineCap='round'; s.lineWidth = sz*0.16;
+    s.beginPath(); s.moveTo(x, y+sz*0.32); s.lineTo(x, y-sz*0.34); s.stroke();
+    s.beginPath(); s.moveTo(x, y); s.lineTo(x-sz*0.24, y-sz*0.05); s.lineTo(x-sz*0.24, y-sz*0.22); s.stroke();
+    s.beginPath(); s.moveTo(x, y+sz*0.12); s.lineTo(x+sz*0.24, y+sz*0.06); s.lineTo(x+sz*0.24, y-sz*0.12); s.stroke();
+  }else if(kind==='stones'){
+    shadowBlob(s, x, y, sz*0.3, sz*0.22);
+    s.fillStyle = HPAL.stone;
+    s.beginPath(); s.ellipse(x, y+sz*0.18, sz*0.3, sz*0.14, 0, 0, Math.PI*2); s.fill();
+    s.beginPath(); s.ellipse(x, y, sz*0.22, sz*0.12, 0, 0, Math.PI*2); s.fill();
+    s.beginPath(); s.ellipse(x, y-sz*0.16, sz*0.14, sz*0.1, 0, 0, Math.PI*2); s.fill();
+  }else if(kind==='log'){
+    shadowBlob(s, x, y, sz*0.36, sz*0.14);
+    s.fillStyle = HPAL.log;
+    s.save(); s.translate(x,y); s.rotate(0.35);
+    s.fillRect(-sz*0.36, -sz*0.1, sz*0.72, sz*0.2);
+    s.fillStyle = '#8F7F63';
+    s.beginPath(); s.ellipse(sz*0.36, 0, sz*0.05, sz*0.1, 0, 0, Math.PI*2); s.fill();
+    s.restore();
+  }else{ // dark pool
+    s.fillStyle = HPAL.pool;
+    s.beginPath(); s.ellipse(x, y, sz*0.34, sz*0.22, 0, 0, Math.PI*2); s.fill();
+    s.strokeStyle = HPAL.path; s.lineWidth = 1;
+    s.beginPath(); s.ellipse(x, y, sz*0.34, sz*0.22, 0, 0, Math.PI*2); s.stroke();
+  }
+}
+function drawHatIcon(s, x, y, r){ // the hat from above: concentric and proud
+  shadowBlob(s, x, y, r, r*0.8);
+  s.fillStyle = PAL.gem;
+  s.beginPath(); s.arc(x, y, r, 0, Math.PI*2); s.fill();
+  s.fillStyle = '#8C2E39';
+  s.beginPath(); s.arc(x, y, r*0.55, 0, Math.PI*2); s.fill();
+  s.fillStyle = PAL.gem;
+  s.beginPath(); s.arc(x, y, r*0.18, 0, Math.PI*2); s.fill();
+}
+function drawHatPulse(now){
+  const e = cellCenter(G.maze.exit.c, G.maze.exit.r);
+  const pulse = reducedMotion? 0.2 : 0.12 + 0.1*Math.sin(now/400);
+  ctx.globalAlpha = pulse;
+  ctx.strokeStyle = PAL.paper; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(e.x, e.y, cs*0.6, 0, Math.PI*2); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function drawSeeker(x, y, now){
+  const s = cs*0.62;
+  const walking = G.phase==='digging' || G.phase==='bouncing';
+  const ang = Math.atan2(G.heading.dy, G.heading.dx) + Math.PI/2;
+  const waddle = (!reducedMotion && walking)? Math.sin(now/120)*0.07 : 0;
+  const tucked = G.helmetSlip; // the shell-bonk: everything disappears inside
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(ang + waddle);
+  if(!tucked){
+    const step = (!reducedMotion && walking)? Math.sin(now/120)*s*0.07 : 0;
+    ctx.fillStyle = HPAL.foot;
+    [[-0.3,-0.26,step],[0.3,-0.26,-step],[-0.3,0.28,-step],[0.3,0.28,step]].forEach(p=>{
+      ctx.beginPath(); ctx.ellipse(p[0]*s, p[1]*s+p[2], s*0.1, s*0.13, 0, 0, Math.PI*2); ctx.fill();
+    });
+    ctx.fillStyle = HPAL.neck; // head out front, deadpan
+    ctx.beginPath(); ctx.ellipse(0, -s*0.48, s*0.13, s*0.17, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = PAL.ink;
+    ctx.beginPath(); ctx.arc(-s*0.05, -s*0.54, s*0.025, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( s*0.05, -s*0.54, s*0.025, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.fillStyle = HPAL.shell;
+  ctx.beginPath(); ctx.arc(0, 0, s*0.36, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = HPAL.shellDark; ctx.lineWidth = Math.max(1, s*0.05);
+  ctx.beginPath(); ctx.arc(0, 0, s*0.22, 0, Math.PI*2); ctx.stroke();
+  for(let i=0;i<6;i++){
+    const a = i*Math.PI/3;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a)*s*0.22, Math.sin(a)*s*0.22);
+    ctx.lineTo(Math.cos(a)*s*0.35, Math.sin(a)*s*0.35);
+    ctx.stroke();
+  }
+  // once won, the hat is worn and never comes off
+  if(G.phase==='breakthrough' || G.phase==='reveal' || G.phase==='runComplete'){
+    ctx.fillStyle = PAL.gem;
+    ctx.beginPath(); ctx.arc(0, 0, s*0.2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#8C2E39';
+    ctx.beginPath(); ctx.arc(0, 0, s*0.1, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawWatcher(now){
+  const wx = W*0.5, wy = H - botH*0.5;
+  const p = diggerXY();
+  const target = Math.atan2(p.y - wy, p.x - wx);
+  let d = target - G.watcherAng;
+  while(d >  Math.PI) d -= 2*Math.PI;
+  while(d < -Math.PI) d += 2*Math.PI;
+  G.watcherAng += d * (reducedMotion? 1 : 0.02); // the only camera in the game
+  const s = botH*0.42;
+  ctx.save();
+  ctx.translate(wx, wy);
+  ctx.fillStyle = HPAL.shell;
+  ctx.beginPath(); ctx.arc(0, 0, s*0.5, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = HPAL.shellDark; ctx.lineWidth = Math.max(1, s*0.06);
+  ctx.beginPath(); ctx.arc(0, 0, s*0.3, 0, Math.PI*2); ctx.stroke();
+  ctx.rotate(G.watcherAng);
+  ctx.fillStyle = HPAL.neck;
+  ctx.beginPath(); ctx.ellipse(s*0.62, 0, s*0.2, s*0.14, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = PAL.ink;
+  ctx.beginPath(); ctx.arc(s*0.68, -s*0.05, s*0.03, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(s*0.68,  s*0.05, s*0.03, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawLizard(now){
+  const L = HAT_DECOR[G.stageIdx].lizard;
+  const p = cellCenter(L.c, L.r);
+  const s = cs*0.32;
+  ctx.save();
+  ctx.translate(p.x, p.y - cs*0.08);
+  ctx.rotate(0.5);
+  ctx.fillStyle = '#A8865C';
+  ctx.beginPath(); ctx.ellipse(0, 0, s*0.5, s*0.2, 0, 0, Math.PI*2); ctx.fill();     // body
+  ctx.beginPath(); ctx.arc(s*0.55, 0, s*0.16, 0, Math.PI*2); ctx.fill();             // head
+  ctx.strokeStyle = '#A8865C'; ctx.lineWidth = Math.max(1, s*0.1); ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-s*0.45, 0); ctx.quadraticCurveTo(-s*0.85, s*0.15, -s*1.0, -s*0.05); ctx.stroke(); // tail
+  // it never moves, except to blink
+  const blink = !reducedMotion && (Math.floor(now/3800) % 2 === 0) && (now % 3800 < 180);
+  if(!blink){
+    ctx.fillStyle = PAL.ink;
+    ctx.beginPath(); ctx.arc(s*0.6, -s*0.06, s*0.035, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawBumpStars(){
+  G.bumps.forEach(b=>{
+    const p = cellCenter(b.c, b.r);
+    drawStar(p.x, p.y, cs*0.28, PAL.paper, PAL.ink);
+  });
+}
+
+function drawFootprints(){
+  if(G.trace.length < 2) return;
+  ctx.fillStyle = 'rgba(90,74,54,0.55)';
+  let parity = 0, carry = 0;
+  const gap = cs*0.32;
+  for(let i=1;i<G.trace.length;i++){
+    const a = cellCenter(G.trace[i-1].c, G.trace[i-1].r);
+    const b = cellCenter(G.trace[i].c, G.trace[i].r);
+    const dx = b.x-a.x, dy = b.y-a.y;
+    const len = Math.hypot(dx, dy);
+    if(len < 0.001) continue;
+    const ux = dx/len, uy = dy/len;      // along; perpendicular is (-uy, ux)
+    for(let t=carry; t<len; t+=gap){
+      const side = (parity++ % 2 === 0)? 1 : -1;
+      const px = a.x + ux*t - uy*side*cs*0.09;
+      const py = a.y + uy*t + ux*side*cs*0.09;
+      ctx.beginPath(); ctx.ellipse(px, py, cs*0.05, cs*0.07, Math.atan2(dy,dx)+Math.PI/2, 0, Math.PI*2); ctx.fill();
+    }
+    carry = (carry + Math.ceil((len-carry)/gap)*gap) - len;
+  }
+  drawBumpStars();
+  // landmark names, tiny and sentence-case — the reveal teaches the words
+  ctx.fillStyle = PAL.ink; ctx.font = '600 10px -apple-system, ui-rounded, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  HAT_LANDMARKS[G.stageIdx].forEach(L=>{
+    const p = cellCenter(L.c, L.r);
+    ctx.fillText(L.label, p.x, Math.min(H-botH-4, p.y + cs*0.75));
+  });
+  ctx.textAlign = 'start';
+}
+
+function drawSunset(now){
+  // the one elevation shot in this world, like the last page of a picture book
+  const bands = ['#E8B87E','#DFA271','#D08A63'];
+  const bh = H*0.14;
+  bands.forEach((b,i)=>{ ctx.fillStyle=b; ctx.fillRect(0, i*bh, W, bh+1); });
+  ctx.fillStyle = '#C67B5B'; ctx.fillRect(0, 3*bh, W, H-3*bh);
+  ctx.fillStyle = '#F2D8A7';
+  ctx.beginPath(); ctx.arc(W*0.5, bh*3, Math.min(54, W*0.12), 0, Math.PI, true); ctx.fill();
+  ctx.fillStyle = '#7A6248'; ctx.fillRect(0, H*0.52, W, H*0.48);
+  // the big rock
+  ctx.fillStyle = '#59483A';
+  roundedRect(W*0.28, H*0.5, W*0.44, H*0.13, 14);
+  // two tortoises, side by side, saying nothing
+  const tort = (tx, flip)=>{
+    ctx.save();
+    ctx.translate(tx, H*0.5);
+    ctx.scale(flip? -1:1, 1);
+    ctx.fillStyle = '#3E3428';
+    ctx.beginPath(); ctx.arc(0, 0, 15, Math.PI, 0); ctx.fill();
+    ctx.fillRect(-15, -2, 30, 5);
+    ctx.beginPath(); ctx.ellipse(19, -3, 6, 5, 0, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  };
+  tort(W*0.41, false); tort(W*0.59, true);
+  // one hat between them
+  ctx.fillStyle = PAL.gem;
+  ctx.beginPath();
+  ctx.moveTo(W*0.5-9, H*0.5-3); ctx.lineTo(W*0.5, H*0.5-19); ctx.lineTo(W*0.5+9, H*0.5-3);
+  ctx.closePath(); ctx.fill();
+  ctx.fillRect(W*0.5-14, H*0.5-4, 28, 4);
+}
+/* ================= end World Two drawing ================================= */
+
 function drawDebug(){
   const m = G.maze;
   ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -1670,7 +2034,8 @@ function fmtTime(ms){
 }
 function updateHUD(){
   const inPlay = PLAY_PHASES.has(G.phase) || G.phase==='countdown';
-  document.getElementById('hudStage').textContent = 'Stage '+(G.stageIdx+1)+' of 3';
+  document.getElementById('hudStage').textContent =
+    G.phase==='picker'? '' : WORLD().label+' · Stage '+(G.stageIdx+1)+' of 3';
   document.getElementById('hudTime').textContent = (inPlay || G.phase==='breakthrough')? fmtTime(G.stageMs) : '';
   document.getElementById('hudBumps').textContent = (inPlay && G.bumps.length)? '★ '+G.bumps.length : '';
 }
@@ -1678,6 +2043,26 @@ function updateHUD(){
 const panelEl = document.getElementById('panel');
 function showPanel(html){ panelEl.innerHTML = html; panelEl.style.display = 'block'; }
 function hidePanel(){ panelEl.style.display = 'none'; }
+/* World picker: green = Tunnels, red = The Hat, chord = same as last time.
+   The buttons teach themselves. Exists only once the ritual has earned it. */
+function showPicker(){
+  G.phase = 'picker';
+  G.pendingSide = null; G.pendingMs = 0;
+  showPanel(
+    '<h1>Where today?</h1>'+
+    '<p class="vocab"><b class="g">Green</b> &mdash; Tunnels<br><b class="r">Red</b> &mdash; The Hat</p>'+
+    '<p class="hint">Both together &mdash; same as last time</p>'
+  );
+}
+
+function chooseWorld(worldId){
+  G.pendingSide = null;
+  AudioFX.chime();
+  G.world = worldId;
+  LS.set('lastWorld', worldId);
+  setupStage(0);
+}
+
 let dndNudgeShown = false; // once per session, quietly (v1.1)
 function showBriefing(){
   const dnd = dndNudgeShown? '' :
@@ -1699,6 +2084,12 @@ let leftHeld = false, rightHeld = false;
 
 function press(side){
   AudioFX.unlock();
+  if(G.phase==='picker'){
+    // same chord grammar as everywhere else: singles pick, the chord repeats
+    if(G.pendingSide && G.pendingSide!==side){ chooseWorld(G.world); }
+    else if(!G.pendingSide){ G.pendingSide = side; G.pendingMs = 0; }
+    return;
+  }
   if(G.phase!=='junction') return; // mid-corridor presses are silently ignored
   if(G.pendingSide && G.pendingSide!==side){
     // second button landed inside the grace window — that's the chord
@@ -1754,6 +2145,7 @@ window.addEventListener('keydown', e=>{
   else if(e.key==='ArrowRight'){ rightHeld = true; press('right'); bothPressCheck(); }
   else if(e.key==='Enter' || e.key===' ' || e.key==='ArrowDown'){
     if(G.phase==='junction'){ chooseStraight(true); return; }
+    if(G.phase==='picker'){ chooseWorld(G.world); return; }
     leftHeld = true; rightHeld = true; bothPressCheck();
     leftHeld = false; rightHeld = false; G.bothArmed = true;
   }
@@ -1841,7 +2233,11 @@ function applyConfigCosmetics(){
 /* ---------------- Boot ---------------------------------------------------- */
 applyConfigCosmetics();
 G.runSeed = dailySeed();
+const lastWorld = LS.get('lastWorld', 'tunnels');
+G.world = WORLDS[lastWorld]? lastWorld : 'tunnels';
 setupStage(0);
+// World Two exists only after the ritual has earned it; until then, no picker
+if(LS.get('runs', 0) >= CONFIG.hatUnlockRuns) showPicker();
 
 function frame(now){
   const dt = Math.min(100, now - lastT);
@@ -1854,8 +2250,8 @@ function frame(now){
 requestAnimationFrame(frame);
 
 // exposed for the tuning panel & automated tests
-window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, setupStage,
-  dailySeed, generateStageRows, validateStage, solveMaze,
+window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
+  dailySeed, generateStageRows, validateStage, solveMaze, chooseWorld,
   advanceStreak, currentStreak, effectiveGenParams, dayNumber };
 </script>
 </body>

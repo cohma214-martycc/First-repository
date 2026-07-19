@@ -99,7 +99,14 @@ Stage 1 is never nudged. Max-notch 600-maze sweep passes at 100%.
 - Map panel groundwork: `positionUpdateAtJunctionsOnly` made real (marker
   updates at junctions when set). Full map/memory *modes* remain v3.
 
-### M6 — World Two: The Hat, hand-authored (v2.5 H1)
+### M6 — World Two: The Hat, hand-authored (v2.5 H1) — **SHIPPED**
+Shipped notes: engine/world refactor landed first as its own commit with
+the suite green. H1 stages are vertical flips of the hand-authored
+tunnel fixtures (flip preserves every invariant; Seeker walks bottom →
+top). Landmarks hand-placed beside junctions with reveal labels;
+lizard, half-buried second hat, watcher head-tracking, footprint
+reveal, sunset scene, world picker with chord-repeats-last-world.
+Stats say "bonks" in the desert.
 - **Refactor first, features second:** extract the world-agnostic engine
   (phases, chord input, junction logic, bounce, timers, reveal flow,
   stats, persistence, audio scaffolding) from World One's presentation
