@@ -543,6 +543,58 @@ function stageRowsFor(idx){
   return { name: fb.name, rows: fb.rows, generated:false };
 }
 
+/* ---------------- Collectible gems (M3) -----------------------------------
+   Distinct from the decorative treasure in the walls (which is never
+   collectible). These sit on open cells: gemDeadEndBias of them tucked in
+   dead-end tips — the tempting detour the pair decides on together, paid
+   for with a bump — and the rest on the main route, grabbed on the way.
+   Deterministic per daily seed so today's gems are the same all day.      */
+function mazeRouteCells(m){
+  const ck=(c,r)=>c+','+r;
+  const parent=new Map([[ck(m.start.c,m.start.r),null]]);
+  const q=[m.start];
+  while(q.length){
+    const cur=q.shift();
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nc=cur.c+dx,nr=cur.r+dy;
+      if(m.isOpen(nc,nr)&&!parent.has(ck(nc,nr))){ parent.set(ck(nc,nr),cur); q.push({c:nc,r:nr}); }
+    }
+  }
+  const path=[]; let cur={...m.exit};
+  while(cur){ path.push({c:cur.c,r:cur.r}); cur=parent.get(ck(cur.c,cur.r)); }
+  return path.reverse();
+}
+
+function placeGems(rowsArr, rnd){
+  const m = parseStage({name:'', rows:rowsArr});
+  const route = mazeRouteCells(m);
+  const onRoute = new Set(route.map(c=>c.c+','+c.r));
+  const isEnd = (c,r)=> (c===m.start.c&&r===m.start.r)||(c===m.exit.c&&r===m.exit.r);
+  const deg = (c,r)=> [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx,dy])=>m.isOpen(c+dx,r+dy)).length;
+  const shuffle = (arr)=>{ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); const t=arr[i]; arr[i]=arr[j]; arr[j]=t; } return arr; };
+
+  // dead-end tips off the main route — the agonisingly-close detour
+  const deadTips = [];
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(m.isOpen(c,r) && !isEnd(c,r) && !onRoute.has(c+','+r) && deg(c,r)===1) deadTips.push({c,r});
+  }
+  const routeMid = route.filter(c=> !isEnd(c.c,c.r));
+  shuffle(deadTips); shuffle(routeMid);
+
+  const want = CONFIG.gemCount;
+  const wantDead = Math.min(deadTips.length, Math.round(want * CONFIG.gemDeadEndBias));
+  const gems = [], taken = new Set();
+  const add = (cell, inDeadEnd)=>{
+    const k = cell.c+','+cell.r;
+    if(taken.has(k)) return;
+    taken.add(k); gems.push({ c:cell.c, r:cell.r, collected:false, deadEnd:!!inDeadEnd });
+  };
+  for(let i=0;i<wantDead;i++) add(deadTips[i], true);
+  for(const cell of routeMid){ if(gems.length>=want) break; add(cell, false); }
+  for(let i=wantDead;i<deadTips.length && gems.length<want;i++) add(deadTips[i], true); // sparse-route fallback
+  return gems;
+}
+
 /* ---------------- Streaks & capped difficulty (M2) ------------------------
    A day counts when a full 3-stage run completes. One missed day bends the
    streak without breaking it (life happens on a Tuesday); two consecutive
@@ -650,6 +702,11 @@ const AudioFX = (function(){
       tone(1047, 480, {type:'sine', vol:0.2, delayMs:notes.length*130});
     },
     chime(){ tone(880, 200, {type:'sine', vol:0.14}); tone(1175, 260, {type:'sine', vol:0.12, delayMs:90}); },
+    gem(){ // a bright little "found it!" arpeggio
+      tone(1047, 90, {type:'triangle', vol:0.16});
+      tone(1319, 110, {type:'triangle', vol:0.15, delayMs:70});
+      tone(1568, 160, {type:'sine', vol:0.14, delayMs:150});
+    },
   };
 })();
 
@@ -724,8 +781,10 @@ const G = {
   sinceJunction: [],   // cells since the last junction — the bounce-back path
   lastJunction: null,  // {cell, heading}
   bumps: [],           // {c,r} per stage — becomes reveal stars
+  gems: [],            // {c,r,collected} — collectible, World One only (v2)
+  gemsThisStage: 0,
   stageMs: 0,
-  stageTimes: [], stageBumpCounts: [],
+  stageTimes: [], stageBumpCounts: [], stageGemCounts: [],
   countdownT: 0, bannerT: 0, stunT: 0, stunAfter: null,
   bouncePath: null, bounceIdx: 0, bounceT: 0,
   junctionWaitMs: 0, recueMs: 0,
@@ -742,6 +801,7 @@ const G = {
   totals(){ return {
     time: this.stageTimes.reduce((a,b)=>a+b,0),
     bumps: this.stageBumpCounts.reduce((a,b)=>a+b,0),
+    gems: this.stageGemCounts.reduce((a,b)=>a+b,0),
   }; },
 };
 
@@ -784,6 +844,7 @@ const WORLDS = {
   tunnels: {
     label: 'Tunnels',
     companion: true,   // the dog
+    hasGems: true,     // collectible gems + the dog's gem-sense (v2)
     bumpNoun: 'Bumps',
     bumpDry: false,
     dust: '#6B4F35', burst: ['#6B4F35','#C9A876'],
@@ -792,7 +853,7 @@ const WORLDS = {
     topStrip: ()=> Math.max(44, Math.round(H*0.12)),   // the sky
     bottomStrip: ()=> 0,
     buildStatic: (s, rnd, m)=> buildStaticTunnels(s, rnd, m),
-    drawExtras: (now)=>{ if(CONFIG.showCat && G.stageIdx>=1) drawCat(now); drawSparkles(now); },
+    drawExtras: (now)=>{ if(CONFIG.showCat && G.stageIdx>=1) drawCat(now); drawSparkles(now); drawGems(now); },
     drawExitMarker: (now)=> drawExitStar(now),
     drawTrail: ()=> drawPathTrace(),
     drawWaiting: (now)=>{
@@ -809,6 +870,7 @@ const WORLDS = {
   hat: {
     label: 'The Hat',
     companion: false,  // no dog in the desert (a lizard suns itself instead)
+    hasGems: false,    // the desert's buried-treasure joke is the second hat
     bumpNoun: 'Bonks',
     bumpDry: true,     // shell-bonks: same family, drier
     dust: '#CBB78E', burst: ['#CBB78E','#EADDBA'],
@@ -1140,6 +1202,10 @@ function setupStage(idx){
   G.sinceJunction = [{...G.cell}];
   G.lastJunction = null;
   G.bumps = [];
+  G.gems = WORLD().hasGems
+    ? placeGems(G.maze.rows, mulberry32(hash32(G.runSeed, 0x6E45 + G.stageIdx)))
+    : [];
+  G.gemsThisStage = 0;
   G.stageMs = 0;
   G.helmetSlip = false;
   G.facing = 1;
@@ -1177,6 +1243,13 @@ function arriveAt(cell){
   G.sinceJunction.push({...cell});
   AudioFX.digBlip();
   buzz(12);
+
+  // collectible gems: automatic on touch, before the cell's own consequence
+  // (a dead-end gem is grabbed on arrival, then the bump still bounces you)
+  if(WORLD().hasGems){
+    const g = G.gems.find(g=> !g.collected && g.c===cell.c && g.r===cell.r);
+    if(g){ g.collected = true; G.gemsThisStage++; collectGemFX(cell); }
+  }
 
   const m = G.maze;
   if(cell.c===m.exit.c && cell.r===m.exit.r){ breakthrough(); return; }
@@ -1283,9 +1356,13 @@ function showReveal(){
   G.phase = 'reveal';
   G.stageTimes.push(G.stageMs);
   G.stageBumpCounts.push(G.bumps.length);
+  G.stageGemCounts.push(G.gemsThisStage);
+  const gemLine = (WORLD().hasGems && G.gems.length)
+    ? '<p class="vocab">Found '+G.gemsThisStage+' of '+G.gems.length+' gems &#9670;</p>' : '';
   showPanel(
     '<h1>You made it!</h1>'+
     '<p>Time '+fmtTime(G.stageMs)+' &middot; '+WORLD().bumpNoun+' '+G.bumps.length+' &#9733;</p>'+
+    gemLine+
     (G.stageIdx<2
       ? '<p class="hint">Hold both buttons together for the next stage</p>'
       : '<p class="hint">Hold both buttons together to finish the run</p>')
@@ -1320,6 +1397,7 @@ function finishRun(){
     '<p class="vocab">Snack time!</p>'+
     '<p class="vocab">Day '+streak.count+' of digging together</p>'+
     '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' '+WORLD().bumpNoun.toLowerCase()+' &#9733;</p>'+
+    (WORLD().hasGems? '<p class="vocab">Gems found: '+tot.gems+' &#9670;</p>' : '')+
     (badges.length? badges.map(x=>'<span class="badge">'+x+'</span>').join('') : '')+
     '<p class="dim">Today: '+fmtTime(sb.fastestMs)+' &middot; '+sb.fewestBumps+' bumps'+
     '<br>Best ever: '+fmtTime(best.fastestMs)+' &middot; smoothest '+best.fewestBumps+' bumps'+
@@ -1334,7 +1412,7 @@ function nextAfterReveal(){
 }
 
 function newRun(){
-  G.stageTimes = []; G.stageBumpCounts = [];
+  G.stageTimes = []; G.stageBumpCounts = []; G.stageGemCounts = [];
   G.runSeed = dailySeed(); // re-read: a run started after midnight gets the new day
   setupStage(0);
 }
@@ -1371,6 +1449,19 @@ function dustPuff(){
     G.particles.push({ x:p.x+G.heading.dx*cs*0.4, y:p.y+G.heading.dy*cs*0.4,
       vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-30, life:0.5+Math.random()*0.3,
       size:cs*(0.08+Math.random()*0.1), color:WORLD().dust });
+  }
+}
+
+function collectGemFX(cell){
+  AudioFX.gem();
+  buzz(15);
+  if(reducedMotion) return;
+  const p = cellCenter(cell.c, cell.r);
+  for(let i=0;i<10;i++){
+    const a = Math.random()*Math.PI*2, sp = 30+Math.random()*70;
+    G.particles.push({ x:p.x, y:p.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-40,
+      life:0.5+Math.random()*0.4, size:cs*(0.06+Math.random()*0.08),
+      color: i%2? PAL.gem : '#E8B0B8' });
   }
 }
 
@@ -1498,7 +1589,10 @@ function render(now){
       WORLD().drawAvatar(p.x, p.y, now);
       if(WORLD().companion && CONFIG.showDog){
         const d = dogXY();
-        drawDog(d.x, d.y, G.dogFacing, d.moving, now);
+        // the dog always knows: its ear pricks up near an uncollected gem
+        const earPrick = WORLD().hasGems && G.gems.some(g=> !g.collected &&
+          Math.max(Math.abs(g.c-G.cell.c), Math.abs(g.r-G.cell.r)) <= 2);
+        drawDog(d.x, d.y, G.dogFacing, d.moving, now, earPrick);
       }
     }
   }
@@ -1514,6 +1608,29 @@ function render(now){
   if(G.phase==='runComplete'){ WORLD().drawCelebration(now); drawSnackScene(now); }
 
   if(CONFIG.debugOverlay) drawDebug();
+}
+
+function drawGemIcon(x, y, r){ // a bright faceted gem — collectible, on the path
+  ctx.fillStyle = PAL.gem;
+  ctx.beginPath();
+  ctx.moveTo(x, y-r); ctx.lineTo(x+r*0.82, y); ctx.lineTo(x, y+r); ctx.lineTo(x-r*0.82, y);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(242,232,216,0.45)'; // facet glint
+  ctx.beginPath(); ctx.moveTo(x, y-r); ctx.lineTo(x+r*0.32, y-r*0.24); ctx.lineTo(x-r*0.28, y-r*0.2);
+  ctx.closePath(); ctx.fill();
+}
+
+function drawGems(now){
+  if(!G.gems || !G.gems.length) return;
+  const revealing = (G.phase==='reveal' || G.phase==='runComplete');
+  G.gems.forEach((g,i)=>{
+    if(g.collected) return;                 // collected gems are gone
+    const p = cellCenter(g.c, g.r);
+    const pulse = reducedMotion? 1 : 0.86 + 0.14*Math.sin(now/300 + i*1.7);
+    ctx.globalAlpha = revealing? 0.4 : 1;   // on the reveal, the ones we missed sit softly
+    drawGemIcon(p.x, p.y, cs*0.22*pulse);
+    ctx.globalAlpha = 1;
+  });
 }
 
 function drawExitStar(now){
@@ -1761,7 +1878,7 @@ function dogXY(){
   return { x: pos.x, y: pos.y, moving };
 }
 
-function drawDog(x, y, facing, moving, now){
+function drawDog(x, y, facing, moving, now, earPrick){
   const s = cs*0.4;
   const trot = (!reducedMotion && moving)? Math.sin(now/55)*s*0.09 : 0;
   ctx.save();
@@ -1788,12 +1905,18 @@ function drawDog(x, y, facing, moving, now){
   // snout
   ctx.fillStyle = dark;
   ctx.beginPath(); ctx.ellipse(s*0.58, -s*0.1, s*0.12, s*0.08, 0, 0, Math.PI*2); ctx.fill();
-  // floppy ear (it pricks up for gems — but gems are a v2 story)
+  // the ear: floppy by default, pricked up near a gem (a whisper for the Navigator)
   ctx.fillStyle = dark;
-  ctx.beginPath();
-  ctx.moveTo(s*0.34, -s*0.34); ctx.quadraticCurveTo(s*0.2, -s*0.1, s*0.34, -s*0.04);
-  ctx.quadraticCurveTo(s*0.44, -s*0.16, s*0.34, -s*0.34);
-  ctx.fill();
+  if(earPrick){
+    ctx.beginPath();
+    ctx.moveTo(s*0.3, -s*0.3); ctx.lineTo(s*0.37, -s*0.64); ctx.lineTo(s*0.48, -s*0.32);
+    ctx.closePath(); ctx.fill();
+  }else{
+    ctx.beginPath();
+    ctx.moveTo(s*0.34, -s*0.34); ctx.quadraticCurveTo(s*0.2, -s*0.1, s*0.34, -s*0.04);
+    ctx.quadraticCurveTo(s*0.44, -s*0.16, s*0.34, -s*0.34);
+    ctx.fill();
+  }
   // deadpan dot eye
   ctx.fillStyle = PAL.ink;
   ctx.beginPath(); ctx.arc(s*0.48, -s*0.22, s*0.035, 0, Math.PI*2); ctx.fill();
@@ -2163,7 +2286,10 @@ function updateHUD(){
   document.getElementById('hudStage').textContent =
     G.phase==='picker'? '' : WORLD().label+' · Stage '+(G.stageIdx+1)+' of 3';
   document.getElementById('hudTime').textContent = (inPlay || G.phase==='breakthrough')? fmtTime(G.stageMs) : '';
-  document.getElementById('hudBumps').textContent = (inPlay && G.bumps.length)? '★ '+G.bumps.length : '';
+  const marks = [];
+  if(inPlay && G.gemsThisStage) marks.push('◆ '+G.gemsThisStage);
+  if(inPlay && G.bumps.length) marks.push('★ '+G.bumps.length);
+  document.getElementById('hudBumps').textContent = marks.join('   ');
 }
 
 const panelEl = document.getElementById('panel');
@@ -2378,7 +2504,7 @@ requestAnimationFrame(frame);
 // exposed for the tuning panel & automated tests
 window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
   dailySeed, generateStageRows, validateStage, solveMaze, chooseWorld,
-  generateHatStage, placeLandmarks, LANDMARK_KINDS,
+  generateHatStage, placeLandmarks, LANDMARK_KINDS, placeGems, mazeRouteCells,
   advanceStreak, currentStreak, effectiveGenParams, dayNumber };
 </script>
 </body>

@@ -71,7 +71,16 @@ Stage 1 is never nudged. Max-notch 600-maze sweep passes at 100%.
   simply starts a new count — no "you lost your streak" copy, per tone
   rules).
 
-### M3 — Collectible gems + the dog's gem-sense (v2)
+### M3 — Collectible gems + the dog's gem-sense (v2) — **SHIPPED**
+Shipped notes: gems are a World One feature (hasGems flag; the desert's
+treasure joke stays the second hat). Deterministic per daily seed;
+gemDeadEndBias in dead-end tips (grabbed on the detour, then the bump
+still bounces you), the rest on the route. Auto-collect with a bright
+arpeggio + sparkle burst; HUD ◆ counter; reveal shows "Found N of M",
+missed gems sit faded on the reveal spread; run-complete shows the
+total. Dog's ear pricks up within 2 tiles of an uncollected gem
+(drawn only, never sounded). 1200-placement sweep passes. Decorative
+wall treasure remains untouched and untouchable.
 - `gemCount` gems per stage, `gemDeadEndBias` of them inside dead ends —
   the deliberate detour conversation. Collection is automatic on touch;
   "Found a gem!"; gems tally into stats and (M4) the journal. Never gate
