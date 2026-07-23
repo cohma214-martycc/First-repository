@@ -875,7 +875,8 @@ const WORLDS = {
       if(CONFIG.showDog) drawDog(s0.x - cs*0.85, oy - cs*0.24, 1, false, now);
     },
     drawAvatar: (x, y, now)=> drawDigger(x, y, now),
-    drawCelebration: ()=>{},                            // snack scene is shared
+    rewardLine: 'Snack time!',
+    reward: (now)=> drawSnackScene(now),                // chocolate milk + biscuits
   },
 
   /* World Two — THE HAT. Bird's-eye desert; the Watcher calls, the Seeker
@@ -901,7 +902,8 @@ const WORLDS = {
       drawWatcher(now);
     },
     drawAvatar: (x, y, now)=> drawSeeker(x, y, now),
-    drawCelebration: (now)=> drawSunset(now),
+    rewardLine: 'Off into the stars',
+    reward: (now)=> drawSpaceScene(now),               // both tortoises, hatted, in space
   },
 };
 function WORLD(){ return WORLDS[G.world]; }
@@ -1408,7 +1410,7 @@ function finishRun(){
   G.snackT = 0;
   showPanel(
     '<h1>You made it!</h1>'+
-    '<p class="vocab">Snack time!</p>'+
+    '<p class="vocab">'+WORLD().rewardLine+'</p>'+
     '<p class="vocab">Day '+streak.count+' of digging together</p>'+
     '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' '+WORLD().bumpNoun.toLowerCase()+' &#9733;</p>'+
     (WORLD().hasGems? '<p class="vocab">Gems found: '+tot.gems+' &#9670;</p>' : '')+
@@ -1687,7 +1689,7 @@ function render(now){
   });
   ctx.globalAlpha = 1;
 
-  if(G.phase==='runComplete'){ WORLD().drawCelebration(now); drawSnackScene(now); }
+  if(G.phase==='runComplete') WORLD().reward(now);
 
   if(CONFIG.debugOverlay) drawDebug();
 }
@@ -2339,52 +2341,86 @@ function drawFootprints(){
   ctx.textAlign = 'start';
 }
 
-function drawSunset(now){
-  // the one elevation shot in this world, like the last page of a picture book
-  const bands = ['#E8B87E','#DFA271','#D08A63'];
-  const bh = H*0.14;
-  bands.forEach((b,i)=>{ ctx.fillStyle=b; ctx.fillRect(0, i*bh, W, bh+1); });
-  ctx.fillStyle = '#C67B5B'; ctx.fillRect(0, 3*bh, W, H-3*bh);
-  ctx.fillStyle = '#F2D8A7';
-  ctx.beginPath(); ctx.arc(W*0.5, bh*3, Math.min(54, W*0.12), 0, Math.PI, true); ctx.fill();
-  ctx.fillStyle = '#7A6248'; ctx.fillRect(0, H*0.52, W, H*0.48);
-  // the big rock
-  ctx.fillStyle = '#59483A';
-  roundedRect(W*0.28, H*0.5, W*0.44, H*0.13, 14);
-  // two tortoises, side by side, saying nothing
-  const tort = (tx, flip)=>{
-    ctx.save();
-    ctx.translate(tx, H*0.5);
-    ctx.scale(flip? -1:1, 1);
-    ctx.fillStyle = '#3E3428';
-    ctx.beginPath(); ctx.arc(0, 0, 15, Math.PI, 0); ctx.fill();
-    ctx.fillRect(-15, -2, 30, 5);
-    ctx.beginPath(); ctx.ellipse(19, -3, 6, 5, 0, 0, Math.PI*2); ctx.fill();
-    ctx.restore();
-  };
-  tort(W*0.41, false); tort(W*0.59, true);
-  // one hat between them — elevation view: rounded dented crown, a wide brim
-  // that curls up at both ends, a hatband. Never pointed.
-  const cx = W*0.5, by = H*0.5 - 1, bw = 12, ch = 13;
+/* An elevation-view cowboy hat: rounded dented crown, a hatband, and a wide
+   brim curling up at both ends. Never pointed. bw = crown half-width; by =
+   the brim's baseline. Shared by any elevation scene that wears a hat. */
+function drawElevationHat(g, cx, by, bw){
+  const ch = bw*1.08;
   // brim first (behind the crown), wider than the crown, curling up at the ends
-  ctx.fillStyle = HPAL.hatTan;
-  ctx.beginPath();
-  ctx.moveTo(cx-bw*1.8, by-1);
-  ctx.quadraticCurveTo(cx, by+6, cx+bw*1.8, by-1);          // brim underside dips low in the middle
-  ctx.quadraticCurveTo(cx+bw*1.7, by-4.5, cx+bw*1.15, by-2); // right end curls up
-  ctx.quadraticCurveTo(cx, by+1, cx-bw*1.15, by-2);          // brim top edge
-  ctx.quadraticCurveTo(cx-bw*1.7, by-4.5, cx-bw*1.8, by-1);  // left end curls up
-  ctx.closePath(); ctx.fill();
-  // crown — a rounded dome with a gentle centre dent, never a point
-  ctx.beginPath();
-  ctx.moveTo(cx-bw, by);
-  ctx.quadraticCurveTo(cx-bw, by-ch, cx-bw*0.4, by-ch);
-  ctx.quadraticCurveTo(cx, by-ch*0.72, cx+bw*0.4, by-ch);    // the dent
-  ctx.quadraticCurveTo(cx+bw, by-ch, cx+bw, by);
-  ctx.closePath(); ctx.fill();
-  // hatband at the base of the crown
-  ctx.fillStyle = HPAL.hatShade;
-  ctx.fillRect(cx-bw, by-3, bw*2, 3);
+  g.fillStyle = HPAL.hatTan;
+  g.beginPath();
+  g.moveTo(cx-bw*1.8, by-1);
+  g.quadraticCurveTo(cx, by+bw*0.5, cx+bw*1.8, by-1);
+  g.quadraticCurveTo(cx+bw*1.7, by-bw*0.38, cx+bw*1.15, by-bw*0.17);
+  g.quadraticCurveTo(cx, by+bw*0.08, cx-bw*1.15, by-bw*0.17);
+  g.quadraticCurveTo(cx-bw*1.7, by-bw*0.38, cx-bw*1.8, by-1);
+  g.closePath(); g.fill();
+  // crown — a rounded dome with a gentle centre dent
+  g.beginPath();
+  g.moveTo(cx-bw, by);
+  g.quadraticCurveTo(cx-bw, by-ch, cx-bw*0.4, by-ch);
+  g.quadraticCurveTo(cx, by-ch*0.72, cx+bw*0.4, by-ch);
+  g.quadraticCurveTo(cx+bw, by-ch, cx+bw, by);
+  g.closePath(); g.fill();
+  // hatband
+  g.fillStyle = HPAL.hatShade;
+  g.fillRect(cx-bw, by-Math.max(2, bw*0.25), bw*2, Math.max(2, bw*0.25));
+}
+
+/* A little deadpan tortoise, side-on, wearing a hat. Head points toward its
+   facing (inward, so a pair face each other). */
+function drawSpaceTortoise(x, y, flip, s){
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(flip? -1:1, 1);
+  // tucked feet, floating
+  ctx.fillStyle = HPAL.foot;
+  ctx.beginPath(); ctx.ellipse(-s*0.5, s*0.52, s*0.16, s*0.12, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( s*0.35, s*0.55, s*0.16, s*0.12, 0, 0, Math.PI*2); ctx.fill();
+  // shell dome
+  ctx.fillStyle = HPAL.shell;
+  ctx.beginPath(); ctx.arc(0, 0, s, Math.PI, 0); ctx.fill();
+  ctx.fillRect(-s, 0, s*2, s*0.26);
+  ctx.strokeStyle = HPAL.shellDark; ctx.lineWidth = Math.max(1, s*0.06);
+  ctx.beginPath(); ctx.arc(0, 0, s*0.58, Math.PI, 0); ctx.stroke();
+  for(let i=1;i<4;i++){ const a = Math.PI + i*Math.PI/4;
+    ctx.beginPath(); ctx.moveTo(Math.cos(a)*s*0.58, Math.sin(a)*s*0.58);
+    ctx.lineTo(Math.cos(a)*s, Math.sin(a)*s); ctx.stroke(); }
+  // head out front, deadpan
+  ctx.fillStyle = HPAL.neck;
+  ctx.beginPath(); ctx.ellipse(s*0.98, s*0.04, s*0.28, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = PAL.ink;
+  ctx.beginPath(); ctx.arc(s*1.08, -s*0.02, s*0.04, 0, Math.PI*2); ctx.fill();
+  // the hat, worn on the shell (as the Seeker wears it)
+  drawElevationHat(ctx, 0, -s*0.7, s*0.5);
+  ctx.restore();
+}
+
+/* Run complete, World Two: the book's final beat — homage in spirit, all
+   original art. Both tortoises drift among the stars, each in a hat. */
+function drawSpaceScene(now){
+  ctx.fillStyle = '#0A0A14'; // night, all the way down
+  ctx.fillRect(0, 0, W, H);
+  const fade = reducedMotion? 1 : Math.min(1, G.snackT/500);
+  // a stable star field, seeded from the day, gently twinkling
+  const rnd = mulberry32(hash32(G.runSeed, 0x57A25));
+  for(let i=0;i<90;i++){
+    const x = rnd()*W, y = rnd()*H, base = 0.35 + rnd()*0.6;
+    const tw = reducedMotion? base : base*(0.6 + 0.4*Math.sin(now/500 + i*1.3));
+    ctx.globalAlpha = Math.max(0, tw)*fade;
+    ctx.fillStyle = rnd()<0.12? '#F2D8A7' : '#F2E8D8';
+    const r = rnd()<0.14? 1.8 : 1.0;
+    ctx.fillRect(x, y, r, r);
+  }
+  ctx.globalAlpha = fade;
+  // the pair, side by side near the top so they clear the stats card, facing
+  // each other, drifting up a little as they go
+  const drift = reducedMotion? 0 : Math.min(14, G.snackT/1000*8);
+  const bob = reducedMotion? 0 : Math.sin(now/750)*3;
+  const s = Math.min(22, W*0.058), cy = H*0.155 - drift;
+  drawSpaceTortoise(W*0.40, cy + bob, false, s);   // head points right, inward
+  drawSpaceTortoise(W*0.60, cy - bob, true,  s);   // head points left, inward
+  ctx.globalAlpha = 1;
 }
 /* ================= end World Two drawing ================================= */
 

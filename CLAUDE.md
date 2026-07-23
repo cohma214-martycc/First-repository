@@ -183,12 +183,12 @@ Two tortoises in a scrubby desert. The **Watcher** (Alma's avatar) sits on a tal
 
 ### Reveal & run completion
 - The reveal spread shows the whole desert from above with the Seeker's **footprint trail** dotted through the sand, shell-bonk stars at every bonk, the plan-trace line underneath (v2 systems shared).
-- **Run complete:** the Seeker reaches the hat and puts it on. Final scene: both tortoises side by side on the big rock, one hat between them, watching the sunset. Nobody says anything. After a beat, the snack rises: **chocolate milk and animal biscuits** — same snack, both worlds, because the ritual is the ritual.
+- **Run complete:** the Seeker reaches the hat and puts it on. Final scene (an homage in spirit to the book's last page — **all original art**, no reproduction of Klassen's illustration): a black sky full of stars, the two tortoises side by side, each wearing a hat, drifting off among them. Nobody says anything. World Two closes here — the **chocolate milk and animal biscuits** snack is World One's sign-off; the stars are the Hat's. The ritual is shared (one streak, one journal); only the closing image differs.
 
 ### Art direction (delta from §5)
-- Palette shifts warm and pale: sand, sage-green scrub, long shadows. Keep the same one-saturated-accent rule — the hat is the accent (a dusty red hat, `gem` #B23A48 earns its keep here).
+- Palette shifts warm and pale: sand, sage-green scrub, long shadows. The hat is the focal object — a **tan cowboy hat** (`hatTan` #C2A06A, `hatCrown` #A88752, `hatShade` #8E6F42), matte and flat, all clearly darker than the sand so it reads instantly (wide flat brim, rounded dented crown, a centre crease — never a red disc). `gem` #B23A48 stays World One's one saturated accent.
 - Same flat colour fields, paper grain, no gradients, 1px max outlines. Shadows are single flat shapes cast consistently to one side — in plan view, shadows are what make landmarks readable, so they matter more here.
-- Sunset run-complete scene rendered side-on (the one elevation shot in this world), like the last page of a picture book.
+- Run-complete star scene rendered side-on (the one elevation shot in this world), like the last page of a picture book: a night sky, two hatted tortoises adrift.
 
 ### World picker
 - At boot, a simple picker card: **GREEN button = Tunnels, RED button = The Hat.** The buttons teach themselves. (Chord = replay whichever world you played last.) No menus, no scrolling, no third touch target.
