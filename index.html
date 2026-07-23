@@ -2019,6 +2019,8 @@ const HPAL = {
   boulder:'#A79C88', log:'#B0A183', pool:'#5E7876', stone:'#B9AE97',
   shadow:'rgba(60,50,35,0.18)', shell:'#7A8560', shellDark:'#5F6A4A',
   neck:'#8A9467', foot:'#6F7A55', rock:'#B4A88F',
+  // the hat — a tan cowboy hat, matte and flat; all darker than sand so it reads
+  hatTan:'#C2A06A', hatCrown:'#A88752', hatShade:'#8E6F42',
 };
 
 function buildStaticHat(s, rnd, m){
@@ -2051,12 +2053,15 @@ function buildStaticHat(s, rnd, m){
   // landmarks — bigger, distinct, nameable
   lm.forEach(L=> drawLandmark(s, ox+L.c*cs+cs/2, oy+L.r*cs+cs/2, cs, L.kind));
 
-  // the second hat, half-buried, never acknowledged
+  // the second hat, half-buried in the sand, never acknowledged — same tan hat
   if(CONFIG.buriedSecondHat){
     const sh = deco.secondHat;
     const x = ox+sh.c*cs+cs/2, y = oy+sh.r*cs+cs/2;
-    s.fillStyle = PAL.gem; s.globalAlpha = 0.8;
-    s.beginPath(); s.ellipse(x, y+cs*0.1, cs*0.3, cs*0.12, 0.2, Math.PI, 0, true); s.fill();
+    s.globalAlpha = 0.85;
+    s.fillStyle = HPAL.hatTan; // the brim poking out of the sand
+    s.beginPath(); s.ellipse(x, y+cs*0.12, cs*0.3, cs*0.13, 0.15, Math.PI, 0, true); s.fill();
+    s.fillStyle = HPAL.hatShade; // the crown edge just visible above it
+    s.beginPath(); s.ellipse(x, y+cs*0.02, cs*0.14, cs*0.08, 0.15, Math.PI, 0, true); s.fill();
     s.globalAlpha = 1;
   }
 
@@ -2170,14 +2175,37 @@ function drawLandmark(s, x, y, sz, kind){
     s.globalAlpha = 1;
   }
 }
-function drawHatIcon(s, x, y, r){ // the hat from above: concentric and proud
+function roundedRectOn(g,x,y,w,h,r){ // fills a stadium/rounded-rect on any context
+  g.beginPath();
+  g.moveTo(x+r,y);
+  g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r);
+  g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r);
+  g.closePath(); g.fill();
+}
+
+/* A bird's-eye tan cowboy hat: wide flat brim, rounded crown, a centre crease
+   with two front pinch dents — the crease is what makes it read as a hat, not
+   a disc. The long axis is front-to-back (local +/-y), so it aligns with a
+   facing. Shared by the goal marker, the worn hat, and the buried second hat. */
+function topDownHat(g, x, y, r){
+  // brim — an ellipse, longer front-to-back than side-to-side (not a circle)
+  g.fillStyle = HPAL.hatTan;
+  g.beginPath(); g.ellipse(x, y, r, r*1.05, 0, 0, Math.PI*2); g.fill();
+  // crown — a stadium down the long axis
+  const cw = r*0.5, ch = r*0.85;
+  g.fillStyle = HPAL.hatCrown;
+  roundedRectOn(g, x-cw/2, y-ch/2, cw, ch, cw*0.5);
+  // crease — a narrow shade line down the centre of the crown
+  g.fillStyle = HPAL.hatShade;
+  g.beginPath(); g.ellipse(x, y, r*0.05, ch*0.42, 0, 0, Math.PI*2); g.fill();
+  // two pinch dents near the front end of the crown (front = -y)
+  g.beginPath(); g.ellipse(x-cw*0.26, y-ch*0.30, r*0.06, r*0.085, 0, 0, Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse(x+cw*0.26, y-ch*0.30, r*0.06, r*0.085, 0, 0, Math.PI*2); g.fill();
+}
+
+function drawHatIcon(s, x, y, r){ // the goal marker — the hat from above
   shadowBlob(s, x, y, r, r*0.8);
-  s.fillStyle = PAL.gem;
-  s.beginPath(); s.arc(x, y, r, 0, Math.PI*2); s.fill();
-  s.fillStyle = '#8C2E39';
-  s.beginPath(); s.arc(x, y, r*0.55, 0, Math.PI*2); s.fill();
-  s.fillStyle = PAL.gem;
-  s.beginPath(); s.arc(x, y, r*0.18, 0, Math.PI*2); s.fill();
+  topDownHat(s, x, y, r);
 }
 function drawHatPulse(now){
   const e = cellCenter(G.maze.exit.c, G.maze.exit.r);
@@ -2220,12 +2248,10 @@ function drawSeeker(x, y, now){
     ctx.lineTo(Math.cos(a)*s*0.35, Math.sin(a)*s*0.35);
     ctx.stroke();
   }
-  // once won, the hat is worn and never comes off
+  // once won, the hat is worn and never comes off — it sits on the shell and
+  // rotates with the tortoise (we're already in its rotated frame)
   if(G.phase==='breakthrough' || G.phase==='reveal' || G.phase==='runComplete'){
-    ctx.fillStyle = PAL.gem;
-    ctx.beginPath(); ctx.arc(0, 0, s*0.2, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#8C2E39';
-    ctx.beginPath(); ctx.arc(0, 0, s*0.1, 0, Math.PI*2); ctx.fill();
+    topDownHat(ctx, 0, 0, s*0.3);
   }
   ctx.restore();
 }
@@ -2337,12 +2363,28 @@ function drawSunset(now){
     ctx.restore();
   };
   tort(W*0.41, false); tort(W*0.59, true);
-  // one hat between them
-  ctx.fillStyle = PAL.gem;
+  // one hat between them — elevation view: rounded dented crown, a wide brim
+  // that curls up at both ends, a hatband. Never pointed.
+  const cx = W*0.5, by = H*0.5 - 1, bw = 12, ch = 13;
+  // brim first (behind the crown), wider than the crown, curling up at the ends
+  ctx.fillStyle = HPAL.hatTan;
   ctx.beginPath();
-  ctx.moveTo(W*0.5-9, H*0.5-3); ctx.lineTo(W*0.5, H*0.5-19); ctx.lineTo(W*0.5+9, H*0.5-3);
+  ctx.moveTo(cx-bw*1.8, by-1);
+  ctx.quadraticCurveTo(cx, by+6, cx+bw*1.8, by-1);          // brim underside dips low in the middle
+  ctx.quadraticCurveTo(cx+bw*1.7, by-4.5, cx+bw*1.15, by-2); // right end curls up
+  ctx.quadraticCurveTo(cx, by+1, cx-bw*1.15, by-2);          // brim top edge
+  ctx.quadraticCurveTo(cx-bw*1.7, by-4.5, cx-bw*1.8, by-1);  // left end curls up
   ctx.closePath(); ctx.fill();
-  ctx.fillRect(W*0.5-14, H*0.5-4, 28, 4);
+  // crown — a rounded dome with a gentle centre dent, never a point
+  ctx.beginPath();
+  ctx.moveTo(cx-bw, by);
+  ctx.quadraticCurveTo(cx-bw, by-ch, cx-bw*0.4, by-ch);
+  ctx.quadraticCurveTo(cx, by-ch*0.72, cx+bw*0.4, by-ch);    // the dent
+  ctx.quadraticCurveTo(cx+bw, by-ch, cx+bw, by);
+  ctx.closePath(); ctx.fill();
+  // hatband at the base of the crown
+  ctx.fillStyle = HPAL.hatShade;
+  ctx.fillRect(cx-bw, by-3, bw*2, 3);
 }
 /* ================= end World Two drawing ================================= */
 
@@ -2588,7 +2630,7 @@ window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
   dailySeed, generateStageRows, validateStage, solveMaze, chooseWorld,
   generateHatStage, placeLandmarks, LANDMARK_KINDS, placeGems, mazeRouteCells,
   advanceStreak, currentStreak, effectiveGenParams, dayNumber,
-  appendJournal, dateStamp };
+  appendJournal, dateStamp, topDownHat };
 </script>
 </body>
 </html>
