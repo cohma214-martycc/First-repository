@@ -88,7 +88,19 @@ wall treasure remains untouched and untouchable.
 - Dog ear-prick when the digger is within ~2 tiles of an uncollected gem —
   drawn only, never sounded (a whisper for the Navigator).
 
-### M4 — Journal (v2)
+### M4 — Journal (v2) — **SHIPPED**
+Shipped notes: one stamped entry per completed run in `tunnels:journal`
+(day, date, seed, world, time, bumps, gems, streak day, thumbnail).
+Thumbnail is a small offscreen-canvas render of the final maze with the
+inked path — solid line in Tunnels, dashed "footprints" in the desert —
+plus bump stars, exported as JPEG (~2.6 KB each). Array capped at 200,
+newest-in/oldest-out, and quota-safe: if localStorage rejects the write
+it trims oldest entries and retries so a run is never lost. Shared
+across both worlds (one journal). Minimal v2 surface: the fresh stamp
+shows on the run-complete card; a browsable book is deferred. New
+journal unit test (cap + quota trim) plus journal assertions in both
+e2e suites. Creature Keepers had been removed from the repo, so the
+same journaling shape was implemented independently.
 - On run complete, stamp `tunnels:journal[]`: date, seed, total time,
   bumps, gems, streak day, and a small maze thumbnail (offscreen canvas of
   the reveal spread → JPEG data URL, ~10–15 KB each; cap the journal at

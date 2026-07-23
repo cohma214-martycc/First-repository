@@ -77,6 +77,19 @@
   #panel .vocab{ font-size:14px; margin-top:8px; }
   #panel .vocab b.g{ color:#5E7C4A; } #panel .vocab b.r{ color:#A6423A; }
   #panel .dim{ opacity:0.7; font-size:13px; }
+  /* the journal stamp on the run-complete card (v2) */
+  #panel .stamp{
+    margin:12px auto 4px; padding:8px 10px 10px;
+    background: rgba(0,0,0,0.04); border:1px solid rgba(51,41,31,0.15);
+    border-radius:12px; max-width:220px;
+  }
+  #panel .stamp img{
+    width:96px; height:auto; display:block; margin:0 auto 6px;
+    border:1px solid rgba(51,41,31,0.2); border-radius:6px;
+    image-rendering:auto;
+  }
+  #panel .stamp .cap{ font-size:12px; font-weight:700; letter-spacing:0.02em; }
+  #panel .stamp .sub{ font-size:11px; opacity:0.65; margin-top:2px; }
 
   #banner{
     position:fixed; top:34%; left:0; right:0; display:none;
@@ -1389,6 +1402,7 @@ function finishRun(){
   LS.set('runs', runs);
   const streak = advanceStreak(currentStreak(), dayNumber());
   LS.set('streak', streak);
+  const stamp = stampJournal(tot, streak); // one keepsake per completed run
   releaseWake();
   G.phase = 'runComplete';
   G.snackT = 0;
@@ -1399,11 +1413,79 @@ function finishRun(){
     '<p>Whole run: '+fmtTime(tot.time)+' &middot; '+tot.bumps+' '+WORLD().bumpNoun.toLowerCase()+' &#9733;</p>'+
     (WORLD().hasGems? '<p class="vocab">Gems found: '+tot.gems+' &#9670;</p>' : '')+
     (badges.length? badges.map(x=>'<span class="badge">'+x+'</span>').join('') : '')+
+    stamp+
     '<p class="dim">Today: '+fmtTime(sb.fastestMs)+' &middot; '+sb.fewestBumps+' bumps'+
     '<br>Best ever: '+fmtTime(best.fastestMs)+' &middot; smoothest '+best.fewestBumps+' bumps'+
     '<br>Runs together: '+runs+'</p>'+
     '<p class="hint">Hold both buttons together to dig again</p>'
   );
+}
+
+/* ---------------- Journal (M4) --------------------------------------------
+   One stamped keepsake per completed run: date, stats, and a tiny thumbnail
+   of the final maze with the pair's path drawn (footprints in the desert).
+   Shared across worlds — one journal, two worlds. Minimal surface in v2:
+   the fresh page is shown on the run-complete card; a browsable book waits.
+   localStorage only, capped, and it trims oldest-first if storage is full
+   so a run is never lost to a full disk.                                   */
+function dateStamp(){
+  const d = new Date();
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  return d.getDate()+' '+mon+' '+d.getFullYear();
+}
+
+function renderRunThumbnail(){
+  const m = G.maze;
+  const cell = 8, pad = 3;
+  const cv = document.createElement('canvas');
+  cv.width = m.cols*cell + pad*2;
+  cv.height = m.rowsN*cell + pad*2;
+  const t = cv.getContext('2d');
+  const hat = (G.world==='hat');
+  t.fillStyle = hat? HPAL.sand : PAL.soilDeep;
+  t.fillRect(0,0,cv.width,cv.height);
+  t.fillStyle = hat? HPAL.path : PAL.tunnel;
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(m.isOpen(c,r)) t.fillRect(pad+c*cell, pad+r*cell, cell, cell);
+  }
+  const cx = (c)=> pad + c*cell + cell/2, cy = (r)=> pad + r*cell + cell/2;
+  if(G.trace.length > 1){ // the wobbly route, inked (dashed = footprints)
+    t.strokeStyle = PAL.gem; t.lineWidth = Math.max(1.5, cell*0.32);
+    t.lineJoin = 'round'; t.lineCap = 'round';
+    if(hat) t.setLineDash([cell*0.5, cell*0.4]);
+    t.beginPath();
+    G.trace.forEach((p,i)=>{ const x=cx(p.c), y=cy(p.r); i? t.lineTo(x,y) : t.moveTo(x,y); });
+    t.stroke();
+    t.setLineDash([]);
+  }
+  t.fillStyle = PAL.paper; // a star at every thud
+  G.bumps.forEach(b=>{ t.beginPath(); t.arc(cx(b.c), cy(b.r), cell*0.24, 0, Math.PI*2); t.fill(); });
+  return cv.toDataURL('image/jpeg', 0.7);
+}
+
+function appendJournal(entry){
+  let journal = LS.get('journal', []);
+  if(!Array.isArray(journal)) journal = [];
+  journal.push(entry);
+  while(journal.length > 200) journal.shift();       // keep the last ~200 days
+  while(journal.length){                              // trim oldest until it fits
+    try{ localStorage.setItem('tunnels:journal', JSON.stringify(journal)); break; }
+    catch(e){ journal.shift(); }
+  }
+  return journal;
+}
+
+function stampJournal(tot, streak){
+  const thumb = renderRunThumbnail();
+  const entry = { day: dayNumber(), date: dateStamp(), seed: G.runSeed, world: G.world,
+    timeMs: tot.time, bumps: tot.bumps, gems: tot.gems, streakDay: streak.count, thumb };
+  const journal = appendJournal(entry);
+  const n = journal.length;
+  return '<div class="stamp">'+
+    '<img alt="today’s maze" src="'+thumb+'">'+
+    '<div class="cap">'+WORLD().label+' &middot; '+entry.date+'</div>'+
+    '<div class="sub">Pressed into the journal &middot; '+n+' '+(n===1?'day':'days')+'</div>'+
+    '</div>';
 }
 
 function nextAfterReveal(){
@@ -2505,7 +2587,8 @@ requestAnimationFrame(frame);
 window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
   dailySeed, generateStageRows, validateStage, solveMaze, chooseWorld,
   generateHatStage, placeLandmarks, LANDMARK_KINDS, placeGems, mazeRouteCells,
-  advanceStreak, currentStreak, effectiveGenParams, dayNumber };
+  advanceStreak, currentStreak, effectiveGenParams, dayNumber,
+  appendJournal, dateStamp };
 </script>
 </body>
 </html>

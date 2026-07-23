@@ -127,18 +127,18 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - **Wake-lock coverage:** request the wake lock at briefing (not just stage start) and re-request on visibility change in all non-terminal phases, so a slow chat over the briefing map never dims the screen.
 - **Do Not Disturb nudge:** the first briefing of a session shows one quiet line: "Tip: turn on Do Not Disturb — the Driver can't see notifications coming." A banner mid-stage while blindfolded is catastrophic; we can't block it in a web page, so we say it once, politely.
 
-### v2 — Make it a ritual
-- Procedural maze generation from daily date seed, 3-stage ramp.
-- Streak system + streak-driven difficulty (capped, as §4).
-- Gems + dead-end temptations + the dog's gem-sense (the ear prick).
-- Journal: stamped entries per completed run (date, stats, maze thumbnail). Same localStorage journaling pattern as Creature Keepers v3.
-- Map panel for the Navigator alongside the live view.
-- **The plan trace (key spatial-learning feature):** during the briefing, the Navigator traces her intended route on the maze with her finger; the game inks it as a soft grey line. (This is the one sanctioned Navigator touch, and only during briefing.) At the reveal, the plan line is drawn underneath the actual red path. Where they diverge is the teaching moment — "we planned green here but went red!" No scoring, no judgement, ever: the plan is a conversation piece, not a target. Skippable — some days you just dig. Config: `planTraceEnabled`.
+### v2 — Make it a ritual (built, except the map panel + plan trace — see below)
+- **(built)** Procedural maze generation from daily date seed, 3-stage ramp. Validator-first, with the v1 hand-authored mazes kept permanently as the never-broken fallback.
+- **(built)** Streak system + streak-driven difficulty (capped, as §4). One-day grace before a streak bends; two missed days start a new count.
+- **(built)** Gems + dead-end temptations + the dog's gem-sense (the ear prick). World One only; the desert's treasure joke stays the second hat.
+- **(built)** Journal: stamped entries per completed run (date, stats, maze thumbnail — footprints in the desert). Shared across worlds. localStorage array, capped at ~200 and quota-safe (trims oldest first). Minimal surface in v2: the fresh page shows on the run-complete card; a browsable book waits. (The referenced Creature Keepers file has since been removed from the repo, so the same journaling *shape* was implemented independently.)
+- *pending* — Map panel for the Navigator alongside the live view.
+- *pending* — **The plan trace (key spatial-learning feature):** during the briefing, the Navigator traces her intended route on the maze with her finger; the game inks it as a soft grey line. (This is the one sanctioned Navigator touch, and only during briefing.) At the reveal, the plan line is drawn underneath the actual red path. Where they diverge is the teaching moment — "we planned green here but went red!" No scoring, no judgement, ever: the plan is a conversation piece, not a target. Skippable — some days you just dig. Config: `planTraceEnabled`.
 
-### v2.5 — World Two: The Hat (see §7 for the full spec)
-- H1: three hand-authored overworld stages, the two tortoises, landmarks, shell-bonks, footprint reveal, sunset scene. World picker at boot.
-- H2: procedural desert generation on the shared daily seed; landmark-aware generation (every junction within sight of a nameable landmark); journal entries with footprint thumbnails.
-- **Do not start v2.5 until the tunnel ritual has demonstrably stuck** (streaks happening without prompting). The overworld is a reward for a working ritual, not a rescue for a broken one.
+### v2.5 — World Two: The Hat (built — see §7 for the full spec)
+- **(built)** H1: three hand-authored overworld stages, the two tortoises, landmarks, shell-bonks, footprint reveal, sunset scene. World picker at boot.
+- **(built)** H2: procedural desert generation on the shared daily seed; landmark-aware generation (every junction within one tile of a distinct nameable landmark; the nameable vocabulary grew to seven so big stages stay unambiguous); journal entries with footprint thumbnails.
+- **Do not start v2.5 until the tunnel ritual has demonstrably stuck** (streaks happening without prompting) — this gate was met before the Hat was built.
 
 ### v3 — Deepen the learning
 - Map mode and Memory mode stages (Navigator information scaling, §3) — in both worlds.
