@@ -8,6 +8,7 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 - New **§6 v1.1** polish list from blindfolded-playtest review (press acknowledgement, per-button haptic signatures, wake-lock coverage, Do Not Disturb nudge).
 - New **v2 feature: the plan trace** — Navigator inks her intended route during the briefing; the reveal compares plan vs actual. This is the core map-reading teaching mechanic.
 - New **§7: World Two — The Hat**, a top-down overworld mode (homage to *We Found a Hat*), slotted into the roadmap as v2.5. Same two buttons, same colour grammar, new perspective.
+- New **§11 The Hat Rack (built)** — the invisible `hatUnlockRuns` gate is replaced by a visible, countable progression object driven by **days played** (see `WORLDS-THREE-AND-FOUR.md` §11, the authoritative spec). Adds the golden-night bonus and a sealed playtest mode. Pegs for Worlds Three & Four render as silhouettes until those worlds are built (§12–13).
 - New CONFIG keys in §8 to support all of the above.
 
 ---
@@ -140,6 +141,13 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - **(built)** H2: procedural desert generation on the shared daily seed; landmark-aware generation (every junction within one tile of a distinct nameable landmark; the nameable vocabulary grew to seven so big stages stay unambiguous); journal entries with footprint thumbnails.
 - **Do not start v2.5 until the tunnel ritual has demonstrably stuck** (streaks happening without prompting) — this gate was met before the Hat was built.
 
+### v2.6 — The Hat Rack (built — see `WORLDS-THREE-AND-FOUR.md` §11 for the full spec)
+- **(built)** Progression currency: `tunnels:daysPlayed` — distinct calendar days a run was completed, cumulative, monotonic, shared across worlds, migrated from the journal's `day` stamps. Worlds now unlock on **days played** (Tunnels 0, The Hat 5, The Forest 10, Deep Water 15), replacing the invisible `hatUnlockRuns` gate.
+- **(built)** The golden night: a run that is bump-free across all three stages **and** finishes under a derived per-run par is worth two nights instead of one, capped at the first qualifying run each calendar day. **Par is never shown during a stage** and never as a number — only the golden outcome surfaces (gold line, rising two-note chime, distinct haptic, gold particles).
+- **(built)** The hat rack: four pegs, one hat per world; unlocked pegs in full colour, locked pegs as pale silhouettes; countable moon pips for sleeps remaining beneath the next locked peg; a gold-moon tease beside it. Rendered on the run-complete card and in the picker. First appears at 5 days (backfilling pegs 1 & 2); an unlock ceremony precedes the stats when a new peg is earned.
+- **(built)** Playtest mode (Marty only): three doors — URL `?unlockAll=1`, a dev-panel button ("Take all the hats down"), and the 4-3-2-1 rack gesture — unlock all worlds while sealing every write to the real save. A gold-moon tell in the rack corner and `PLAYTEST` in the debug overlay keep a test run unmistakable.
+- *pending* — Worlds Three (The Forest) & Four (Deep Water) themselves, and the N-world picker (`WORLDS-THREE-AND-FOUR.md` §12–14): their rack pegs already render as silhouettes and fill at 10 / 15 days.
+
 ### v3 — Deepen the learning
 - Map mode and Memory mode stages (Navigator information scaling, §3) — in both worlds.
 - Timed junction windows as an unlockable "spicy" modifier.
@@ -192,7 +200,7 @@ Two tortoises in a scrubby desert. The **Watcher** (Alma's avatar) sits on a tal
 
 ### World picker
 - At boot, a simple picker card: **GREEN button = Tunnels, RED button = The Hat.** The buttons teach themselves. (Chord = replay whichever world you played last.) No menus, no scrolling, no third touch target.
-- World Two unlocks after `hatUnlockRuns` completed tunnel runs (default 5) — enough to prove the ritual first. Until then, the picker doesn't exist and Tunnels boots directly.
+- ~~World Two unlocks after `hatUnlockRuns` completed tunnel runs (default 5)~~ **Superseded by §11 (built):** worlds unlock on **days played** (`worldUnlockDays`, The Hat at 5), not run counts. The picker appears once The Hat is earned (or immediately in sealed playtest mode); until then Tunnels boots directly. `hatUnlockRuns` remains in CONFIG for back-compat but no longer gates the picker.
 
 ---
 
@@ -239,6 +247,19 @@ const CONFIG = {
   positionUpdateAtJunctionsOnly: false,
   planTraceEnabled: true,   // briefing finger-trace + plan-vs-actual reveal (v2)
   lineOfSight: false,       // Watcher sees only what's visible from the rock (v3, World Two)
+  // progression & the hat rack (§11, built)
+  worldUnlockDays: { tunnels:0, hat:5, forest:10, deep:15 }, // days-played thresholds
+  rackPipThreshold: 7,      // show countable sleeps when this few remain
+  rackShowsFromWorldTwo: true, // no rack until The Hat (5 days) is reached
+  rackEnabled: true,
+  // the golden night (§11, built) — bump-free AND under par, once per calendar day
+  goldenNightEnabled: true,
+  parSlack: 1.25,           // multiplier on pure travel time
+  junctionThinkMs: 12000,   // free deliberation per junction — deliberately generous
+  goldenNightPerDay: 1,     // first qualifying run each calendar day only
+  // playtest (Marty only) — URL ?unlockAll=1, dev panel, or the 4-3-2-1 rack gesture
+  unlockAll: false,
+  playtestSuppressesWrites: true,
   // debug
   debugOverlay: false,      // show grid, seed, junction ids
   seedOverride: null,       // force a specific daily seed for testing

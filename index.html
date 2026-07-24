@@ -90,6 +90,16 @@
   }
   #panel .stamp .cap{ font-size:12px; font-weight:700; letter-spacing:0.02em; }
   #panel .stamp .sub{ font-size:11px; opacity:0.65; margin-top:2px; }
+  /* the hat rack (§11) — its pegs are tappable for the sealed-mode gesture */
+  #panel .rackHost{ pointer-events:auto; margin:6px auto 2px; max-width:280px; }
+  #panel .rackHost svg{ display:block; width:100%; height:auto; }
+  #panel .golden{
+    display:inline-block; margin:6px 0 2px; padding:3px 14px;
+    border-radius:999px; font-size:15px; font-weight:800;
+    color:#5A4A2A; background:#E9D08A; border:1px solid #C9A034;
+  }
+  #panel .ceremony h1{ font-size:24px; }
+  #panel .ceremony .sub{ font-size:14px; opacity:0.75; margin-top:2px; }
 
   #banner{
     position:fixed; top:34%; left:0; right:0; display:none;
@@ -192,6 +202,19 @@ const CONFIG_DEFAULTS = {
   positionUpdateAtJunctionsOnly: false,
   planTraceEnabled: true,   // briefing finger-trace + plan-vs-actual reveal (v2)
   lineOfSight: false,       // Watcher sees only what's visible from the rock (v3, World Two)
+  // progression & the rack (§11) — days played, not runs, is the currency
+  worldUnlockDays: { tunnels:0, hat:5, forest:10, deep:15 },
+  rackPipThreshold: 7,      // show countable sleeps when this few remain
+  rackShowsFromWorldTwo: true, // no rack until the desert (5 days) is reached
+  rackEnabled: true,
+  // the golden night (§11) — bump-free AND under par, once per calendar day
+  goldenNightEnabled: true,
+  parSlack: 1.25,           // multiplier on pure travel time
+  junctionThinkMs: 12000,   // free deliberation per junction — deliberately generous
+  goldenNightPerDay: 1,     // first qualifying run each calendar day only
+  // playtest (Marty only) — URL ?unlockAll=1, dev panel, or the 4-3-2-1 gesture
+  unlockAll: false,
+  playtestSuppressesWrites: true,
   // feel & pacing (v1)
   bounceSpeedMult: 2.5,     // how fast the digger slides back after a bump
   junctionRecueMs: 5000,    // gentle "still waiting" cue for the eyes-closed Driver
@@ -240,6 +263,17 @@ const PAL = {
   overalls: '#5C6B78',
   spade:    '#8A8378',
 };
+
+/* ---------------- The hat rack (§11) --------------------------------------
+   One peg per world, in unlock order. Each world's hat is its collectible;
+   that every world has a hat is the joke of the whole series. Colours are
+   each world's own; locked pegs show a pale silhouette, never a padlock.  */
+const RACK_PEGS = [
+  { world:'tunnels', shape:'hardhat', colour:'#C9A034', label:'Tunnels' },     // yellow hard hat
+  { world:'hat',     shape:'cowboy',  colour:'#C2A06A', label:'The Hat' },      // tan cowboy hat
+  { world:'forest',  shape:'pointy',  colour:'#B23A48', label:'The Forest' },   // red pointy hat
+  { world:'deep',    shape:'bowler',  colour:'#3E6E9C', label:'Deep Water' },   // small blue bowler
+];
 
 /* ---------------- Hand-authored fallback stages ---------------------------
    '#' = soil, '.' = tunnel corridor, 'S' = start (dig down), 'E' = breakthrough.
@@ -659,6 +693,103 @@ function speedWithNotch(base){
   return base * (currentStreak().notch >= 4 ? CONFIG.streakSpeedMult : 1);
 }
 
+/* ---------------- Progression & the hat rack (§11) ------------------------
+   The currency is DAYS PLAYED — distinct calendar days a run was completed,
+   cumulative, monotonic, shared across all worlds. It never goes backwards
+   and never mentions a day that wasn't played. It replaces the invisible
+   hatUnlockRuns gate: worlds unlock at day thresholds, not run counts.     */
+
+/* Playtest mode (Marty only): sealed from the real save. Three doors open
+   it — the URL param, the dev panel, the 4-3-2-1 rack gesture. While on, no
+   run is stamped, no night is consumed, no streak bends. Reads stay true so
+   the rack renders honestly underneath the unlock-everything overlay.      */
+let playtest = (CONFIG.unlockAll === true || CONFIG.unlockAll === 1 || CONFIG.unlockAll === '1')
+               || LS.get('playtest', false) === true;
+function shouldPersist(){ return !(playtest && CONFIG.playtestSuppressesWrites); }
+function setPlaytest(on){
+  playtest = !!on;
+  LS.set('playtest', playtest);          // the flag itself is not sealed save-data
+  AudioFX.unlockFanfare();
+  buzz([20, 60, 20, 60, 20]);
+}
+
+/* Days played: read stored value, migrating from the journal on first read
+   (the journal already stamps `day` per entry, so nothing is lost when the
+   gate moves off runs). A pure read — the migrated value is persisted on the
+   next completed run, inside updateProgression.                            */
+function getDaysPlayed(){
+  const stored = LS.get('daysPlayed', null);
+  if(stored !== null) return stored;
+  const j = LS.get('journal', []);
+  return new Set((Array.isArray(j)? j : []).map(e=> e.day)).size;
+}
+
+function worldUnlockDay(world){
+  const t = CONFIG.worldUnlockDays || {};
+  return (t[world] !== undefined)? t[world] : 0;
+}
+function isUnlocked(world){
+  if(playtest) return true;                 // every peg holds its hat in playtest
+  return getDaysPlayed() >= worldUnlockDay(world);
+}
+/* The rack itself doesn't exist until World Two is reached (§11). */
+function rackVisible(){
+  if(!CONFIG.rackEnabled) return false;
+  if(playtest) return true;
+  if(!CONFIG.rackShowsFromWorldTwo) return true;
+  return getDaysPlayed() >= worldUnlockDay('hat');
+}
+
+/* Advance the currency on a completed run. A day played is worth one night;
+   a golden night (below) is worth two. Both are capped once per calendar
+   day, so a replayed daily seed can't farm nights. In playtest nothing is
+   written — the returned figures are for truthful on-screen display only.  */
+function updateProgression(goldenQualify){
+  const today = dayNumber();
+  const stored = LS.get('daysPlayed', null);
+  const prev = getDaysPlayed();
+  let dp = prev;
+  let progDay = LS.get('progDay', null);
+  let goldenDay = LS.get('goldenDay', null);
+  if(stored === null){
+    // first read: getDaysPlayed already counted today via the just-stamped
+    // journal entry, so seed the bookkeeping without double-counting.
+    progDay = today;
+  }else if(progDay !== today){
+    dp += 1; progDay = today;              // the base night for playing today
+  }
+  let awardedGold = false;
+  if(goldenQualify && CONFIG.goldenNightEnabled && goldenDay !== today){
+    dp += 1; goldenDay = today; awardedGold = true;   // the golden bonus night
+  }
+  if(shouldPersist()){
+    LS.set('daysPlayed', dp);
+    LS.set('progDay', progDay);
+    LS.set('goldenDay', goldenDay);
+  }
+  return { prev, now: dp, awardedGold };
+}
+
+/* Per-run par from the optimal route (§11). Derived, never authored, so it
+   survives procedural generation and the streak speed lever. Par measures
+   time UNDERGROUND only — the briefing is free — and is NEVER shown as a
+   number; only the golden-night outcome ever surfaces.                     */
+function stageParMs(maze, effectiveSpeed){
+  const routeTiles = Math.max(1, mazeRouteCells(maze).length - 1);
+  const junctionCount = solveMaze(maze.rows).length;
+  return (routeTiles / effectiveSpeed) * 1000 * CONFIG.parSlack
+       + junctionCount * CONFIG.junctionThinkMs;
+}
+
+/* Which worlds crossed their unlock threshold on this run (prev→now days).
+   Drives the unlock ceremony; empty on an ordinary run.                    */
+function newlyUnlocked(prevDays, nowDays){
+  return RACK_PEGS.filter(p=>{
+    const d = worldUnlockDay(p.world);
+    return d > prevDays && d <= nowDays;
+  }).map(p=> p.world);
+}
+
 /* ---------------- Tiny seeded PRNG for decorative dirt ------------------- */
 function mulberry32(seed){
   let a = seed >>> 0;
@@ -715,6 +846,15 @@ const AudioFX = (function(){
       tone(1047, 480, {type:'sine', vol:0.2, delayMs:notes.length*130});
     },
     chime(){ tone(880, 200, {type:'sine', vol:0.14}); tone(1175, 260, {type:'sine', vol:0.12, delayMs:90}); },
+    golden(){ // §11: a rising two-note chime — a golden night knows itself by sound alone
+      tone(784, 260, {type:'sine', vol:0.22});
+      tone(1319, 520, {type:'sine', vol:0.20, delayMs:200});
+      tone(1976, 640, {type:'triangle', vol:0.10, delayMs:200});
+    },
+    unlockFanfare(){ // §11: the rack ceremony — distinct from the stage fanfare
+      const notes = [659, 880, 1047, 1319];
+      notes.forEach((f,i)=> tone(f, 260, {type:'sine', vol:0.24, delayMs:i*150}));
+    },
     gem(){ // a bright little "found it!" arpeggio
       tone(1047, 90, {type:'triangle', vol:0.16});
       tone(1319, 110, {type:'triangle', vol:0.15, delayMs:70});
@@ -798,6 +938,9 @@ const G = {
   gemsThisStage: 0,
   stageMs: 0,
   stageTimes: [], stageBumpCounts: [], stageGemCounts: [],
+  stagePars: [],       // per-stage par time (ms) for the golden-night check (§11)
+  rcPhase: 'stats',    // run-complete sub-step: 'ceremony' (rack) then 'stats'
+  rcRack: null,        // ceremony payload while rcPhase==='ceremony'
   countdownT: 0, bannerT: 0, stunT: 0, stunAfter: null,
   bouncePath: null, bounceIdx: 0, bounceT: 0,
   junctionWaitMs: 0, recueMs: 0,
@@ -1372,6 +1515,7 @@ function showReveal(){
   G.stageTimes.push(G.stageMs);
   G.stageBumpCounts.push(G.bumps.length);
   G.stageGemCounts.push(G.gemsThisStage);
+  G.stagePars.push(stageParMs(G.maze, G.digSpeed)); // §11: par is time underground
   const gemLine = (WORLD().hasGems && G.gems.length)
     ? '<p class="vocab">Found '+G.gemsThisStage+' of '+G.gems.length+' gems &#9670;</p>' : '';
   showPanel(
@@ -1391,24 +1535,40 @@ function finishRun(){
   const badges = [];
   if(best.fastestMs===null || tot.time < best.fastestMs){ best.fastestMs = tot.time; badges.push('Fastest run yet!'); }
   if(best.fewestBumps===null || tot.bumps < best.fewestBumps){ best.fewestBumps = tot.bumps; badges.push('Smoothest run yet!'); }
-  LS.set('best', best);
+  if(shouldPersist()) LS.set('best', best);
   // today's tunnels are replayable all day — track the daily seed's best too
   const sbKey = 'seedbest:'+G.runSeed;
   const sb = LS.get(sbKey, {fastestMs:null, fewestBumps:null});
   let bestToday = false;
   if(sb.fastestMs===null || tot.time < sb.fastestMs){ sb.fastestMs = tot.time; bestToday = true; }
   if(sb.fewestBumps===null || tot.bumps < sb.fewestBumps){ sb.fewestBumps = tot.bumps; bestToday = true; }
-  LS.set(sbKey, sb);
+  if(shouldPersist()) LS.set(sbKey, sb);
   if(bestToday && badges.length===0) badges.push('Best today!');
   const runs = (LS.get('runs', 0)) + 1;
-  LS.set('runs', runs);
+  if(shouldPersist()) LS.set('runs', runs);
   const streak = advanceStreak(currentStreak(), dayNumber());
-  LS.set('streak', streak);
-  const stamp = stampJournal(tot, streak); // one keepsake per completed run
+  if(shouldPersist()) LS.set('streak', streak);
+  const stamp = stampJournal(tot, streak); // one keepsake per completed run (sealed in playtest)
+
+  // §11: the golden night — bump-free AND under par (par is time underground,
+  // never shown as a number). Then advance the days-played currency.
+  const parMs = G.stagePars.reduce((a,b)=> a+b, 0);
+  const goldenQualify = CONFIG.goldenNightEnabled && tot.bumps===0
+                        && G.stagePars.length===3 && tot.time < parMs;
+  const prog = updateProgression(goldenQualify);
+  const awardedGold = prog.awardedGold;
+
   releaseWake();
   G.phase = 'runComplete';
   G.snackT = 0;
-  showPanel(
+
+  // build the stats card once — the ceremony (if any) defers to it on chord
+  const goldHost = awardedGold? ' data-golden="1"' : '';
+  const rackHtml = rackVisible()
+    ? '<div class="rackHost"'+goldHost+'></div>' : '';
+  const goldLine = awardedGold? '<div class="golden">A golden night.</div>' : '';
+  const statsHtml =
+    rackHtml + goldLine +
     '<h1>You made it!</h1>'+
     '<p class="vocab">'+WORLD().rewardLine+'</p>'+
     '<p class="vocab">Day '+streak.count+' of digging together</p>'+
@@ -1419,8 +1579,45 @@ function finishRun(){
     '<p class="dim">Today: '+fmtTime(sb.fastestMs)+' &middot; '+sb.fewestBumps+' bumps'+
     '<br>Best ever: '+fmtTime(best.fastestMs)+' &middot; smoothest '+best.fewestBumps+' bumps'+
     '<br>Runs together: '+runs+'</p>'+
-    '<p class="hint">Hold both buttons together to dig again</p>'
-  );
+    '<p class="hint">Hold both buttons together to dig again</p>';
+
+  // §11: an unlock ceremony precedes the stats when a peg is newly earned.
+  // Sealed playtest never runs it (everything is already unlocked).
+  const unlocked = playtest? [] : newlyUnlocked(prog.prev, prog.now);
+  if(CONFIG.rackEnabled && unlocked.length){
+    const firstRack = CONFIG.rackShowsFromWorldTwo
+      && prog.prev < worldUnlockDay('hat') && prog.now >= worldUnlockDay('hat');
+    // the rack's own arrival backfills pegs 1 & 2 together
+    const highlight = firstRack ? ['tunnels','hat'] : unlocked;
+    const last = unlocked[unlocked.length-1];
+    const sub = last==='deep'? 'This one is not ours.'
+              : last==='forest'? 'Somebody has lost this one.'
+              : 'The rack begins.';
+    G.rcPhase = 'ceremony';
+    G.rcRack = { statsHtml, golden: awardedGold };
+    showPanel(
+      '<div class="ceremony">'+
+      '<div class="rackHost" data-highlight="'+highlight.join(',')+'"'+goldHost+'></div>'+
+      '<h1>A new hat.</h1>'+
+      '<p class="sub">'+sub+'</p>'+
+      '<p class="hint">Hold both buttons together to go on</p>'+
+      '</div>'
+    );
+    AudioFX.unlockFanfare();
+    buzz([40,60,40,60,120]);
+    if(!reducedMotion) rackCelebrationParticles();
+  }else{
+    G.rcPhase = 'stats';
+    showPanel(statsHtml);
+    if(awardedGold){ AudioFX.golden(); buzz([30,50,30,50,30,50,220]); }
+  }
+}
+
+/* Ceremony → stats: the chord after the rack ceremony reveals the stats. */
+function showRunStats(){
+  G.rcPhase = 'stats';
+  showPanel(G.rcRack.statsHtml);
+  if(G.rcRack.golden){ AudioFX.golden(); buzz([30,50,30,50,30,50,220]); }
 }
 
 /* ---------------- Journal (M4) --------------------------------------------
@@ -1497,6 +1694,7 @@ function nextAfterReveal(){
 
 function newRun(){
   G.stageTimes = []; G.stageBumpCounts = []; G.stageGemCounts = [];
+  G.stagePars = []; G.rcPhase = 'stats'; G.rcRack = null;
   G.runSeed = dailySeed(); // re-read: a run started after midnight gets the new day
   setupStage(0);
 }
@@ -1558,6 +1756,19 @@ function breakthroughParticles(){
     G.particles.push({ x:p.x, y:p.y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-80,
       life:0.7+Math.random()*0.6, size:cs*(0.1+Math.random()*0.18),
       color: cols[Math.floor(Math.random()*cols.length)] });
+  }
+}
+
+/* §11: a gentle gold shower behind the rack for the unlock ceremony. Falls
+   from the top of the canvas; the DOM card sits over it, so it reads as the
+   rack raining gold. Respects reduced motion (the caller gates it).        */
+function rackCelebrationParticles(){
+  const n = 22;
+  for(let i=0;i<n;i++){
+    G.particles.push({ x: Math.random()*W, y: -10 - Math.random()*40,
+      vx:(Math.random()-0.5)*30, vy: 60+Math.random()*90,
+      life:1.0+Math.random()*0.8, size: 3+Math.random()*4,
+      color: ['#C9A034','#E9D08A','#B23A48'][Math.floor(Math.random()*3)] });
   }
 }
 
@@ -2433,6 +2644,7 @@ function drawDebug(){
   ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
   ctx.fillText('phase: '+G.phase+'  cell: '+key(G.cell)+'  hdg: '+G.heading.dx+','+G.heading.dy, 8, H-8);
   ctx.fillText('seed: '+G.runSeed+'  '+(G.maze.generated? 'generated':'FALLBACK'), 8, H-20);
+  ctx.fillText('days: '+getDaysPlayed()+(playtest? '  PLAYTEST' : ''), 8, H-32);
 }
 
 /* ---------------- HUD & panels ------------------------------------------- */
@@ -2453,14 +2665,161 @@ function updateHUD(){
 }
 
 const panelEl = document.getElementById('panel');
-function showPanel(html){ panelEl.innerHTML = html; panelEl.style.display = 'block'; }
+function showPanel(html){ panelEl.innerHTML = html; panelEl.style.display = 'block'; mountRacks(); }
 function hidePanel(){ panelEl.style.display = 'none'; }
+
+/* ---------------- The hat rack, drawn (§11) -------------------------------
+   A wooden rail with one peg per world. Unlocked pegs hold their hat in full
+   colour; locked pegs hold a pale silhouette — the shape is the tease, never
+   a padlock. Beneath the next locked peg, the sleeps remaining are countable
+   moons; beside it, a gold moon states that the golden-night bonus exists
+   without ever naming a target time. Rendered as inline SVG so it stays
+   crisp inside the paper card and needs no network.                        */
+const RACK_INK = '#4A3728';
+function hatShapeSVG(shape, cx, baseY, s, colour, locked){
+  const fill = locked? 'rgba(74,55,40,0.14)' : colour;
+  const stroke = locked? 'rgba(74,55,40,0.34)' : 'rgba(0,0,0,0.28)';
+  const sw = locked? 1 : 1.2;
+  const P = (n)=> +(n).toFixed(2);
+  const parts = [];
+  const ell = (ex,ey,rx,ry)=> '<ellipse cx="'+P(ex)+'" cy="'+P(ey)+'" rx="'+P(rx)+'" ry="'+P(ry)+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+sw+'"/>';
+  const path = (d)=> '<path d="'+d+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+sw+'" stroke-linejoin="round"/>';
+  if(shape==='hardhat'){
+    parts.push(ell(cx, baseY, 0.52*s, 0.14*s));
+    parts.push(path('M '+P(cx-0.40*s)+' '+P(baseY)+' A '+P(0.40*s)+' '+P(0.52*s)+' 0 0 1 '+P(cx+0.40*s)+' '+P(baseY)+' Z'));
+    parts.push('<rect x="'+P(cx-0.05*s)+'" y="'+P(baseY-0.60*s)+'" width="'+P(0.10*s)+'" height="'+P(0.16*s)+'" rx="'+P(0.04*s)+'" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+sw+'"/>');
+  }else if(shape==='cowboy'){
+    parts.push(ell(cx, baseY, 0.56*s, 0.13*s));
+    parts.push(path(
+      'M '+P(cx-0.30*s)+' '+P(baseY-0.02*s)+
+      ' C '+P(cx-0.34*s)+' '+P(baseY-0.42*s)+' '+P(cx-0.20*s)+' '+P(baseY-0.52*s)+' '+P(cx-0.10*s)+' '+P(baseY-0.44*s)+
+      ' C '+P(cx-0.03*s)+' '+P(baseY-0.38*s)+' '+P(cx+0.03*s)+' '+P(baseY-0.38*s)+' '+P(cx+0.10*s)+' '+P(baseY-0.44*s)+
+      ' C '+P(cx+0.20*s)+' '+P(baseY-0.52*s)+' '+P(cx+0.34*s)+' '+P(baseY-0.42*s)+' '+P(cx+0.30*s)+' '+P(baseY-0.02*s)+' Z'));
+  }else if(shape==='pointy'){
+    parts.push(ell(cx, baseY, 0.44*s, 0.11*s));
+    parts.push(path(
+      'M '+P(cx)+' '+P(baseY-0.68*s)+
+      ' Q '+P(cx+0.12*s)+' '+P(baseY-0.30*s)+' '+P(cx+0.30*s)+' '+P(baseY-0.02*s)+
+      ' L '+P(cx-0.30*s)+' '+P(baseY-0.02*s)+
+      ' Q '+P(cx-0.12*s)+' '+P(baseY-0.30*s)+' '+P(cx)+' '+P(baseY-0.68*s)+' Z'));
+  }else{ // bowler
+    parts.push(path('M '+P(cx-0.46*s)+' '+P(baseY)+' Q '+P(cx)+' '+P(baseY-0.08*s)+' '+P(cx+0.46*s)+' '+P(baseY)+' Q '+P(cx)+' '+P(baseY+0.10*s)+' '+P(cx-0.46*s)+' '+P(baseY)+' Z'));
+    parts.push(path('M '+P(cx-0.30*s)+' '+P(baseY-0.02*s)+' A '+P(0.30*s)+' '+P(0.36*s)+' 0 0 1 '+P(cx+0.30*s)+' '+P(baseY-0.02*s)+' Z'));
+  }
+  return parts.join('');
+}
+function crescentSVG(cx, cy, r, fill, stroke){
+  const P = (n)=> +(n).toFixed(2);
+  return '<path d="M '+P(cx)+' '+P(cy-r)+' A '+P(r)+' '+P(r)+' 0 1 1 '+P(cx)+' '+P(cy+r)+
+    ' A '+P(r*0.80)+' '+P(r)+' 0 1 0 '+P(cx)+' '+P(cy-r)+' Z" fill="'+fill+'"'+
+    (stroke? ' stroke="'+stroke+'" stroke-width="0.8"' : '')+'/>';
+}
+function buildRackSVG(opts){
+  opts = opts || {};
+  const highlight = opts.highlight || new Set();
+  const days = getDaysPlayed();
+  const W = 300, Hh = 132, baseY = 74, s = 34;
+  const railY = 92;
+  const xs = RACK_PEGS.map((_,i)=> 30 + (i+0.5)*((W-60)/RACK_PEGS.length));
+  let svg = '<svg class="rack" viewBox="0 0 '+W+' '+Hh+'" width="100%" preserveAspectRatio="xMidYMid meet" aria-label="the hat rack">';
+  // the rail
+  svg += '<rect x="22" y="'+railY+'" width="'+(W-44)+'" height="12" rx="6" fill="#6B5A44"/>';
+  // find the next locked peg (the countdown target)
+  let nextIdx = -1;
+  RACK_PEGS.forEach((p,i)=>{ if(nextIdx<0 && !isUnlocked(p.world)) nextIdx = i; });
+  RACK_PEGS.forEach((p,i)=>{
+    const px = xs[i];
+    // the peg
+    svg += '<rect x="'+(px-3)+'" y="'+(railY-12)+'" width="6" height="18" rx="3" fill="#5A4A38"/>';
+    svg += '<circle cx="'+px+'" cy="'+(railY-12)+'" r="4" fill="#6B5A44"/>';
+    const unlocked = isUnlocked(p.world);
+    if(highlight.has(p.world)){ // ceremony ring behind the landing hat
+      svg += '<circle cx="'+px+'" cy="'+(baseY-0.24*s)+'" r="'+(0.62*s)+'" fill="rgba(201,160,52,0.20)"/>';
+    }
+    svg += hatShapeSVG(p.shape, px, baseY, s, p.colour, !unlocked);
+    // the gold-moon tease beside the next locked peg (the bonus exists)
+    if(i===nextIdx){
+      svg += crescentSVG(px+0.42*s, baseY-0.52*s, 5, 'rgba(201,160,52,0.9)', '#8E6F42');
+    }
+  });
+  // countable sleeps under the next locked peg — small moons, one per night
+  if(nextIdx>=0){
+    const remaining = worldUnlockDay(RACK_PEGS[nextIdx].world) - days;
+    if(remaining>0 && remaining <= CONFIG.rackPipThreshold){
+      const px = xs[nextIdx];
+      const gap = 11, y = 116;
+      const startX = px - (remaining-1)*gap/2;
+      for(let k=0;k<remaining;k++){
+        svg += crescentSVG(startX + k*gap, y, 4, 'rgba(74,55,40,0.55)', null);
+      }
+    }
+  }
+  // golden-night scatter: gold flat-particles across the rack (§11)
+  if(opts.golden){
+    const gp = mulberry32(0xC01D * (days+1));
+    for(let k=0;k<9;k++){
+      const gx = 30 + gp()*(W-60), gy = 20 + gp()*70, gs = 3 + gp()*3;
+      svg += '<rect x="'+gx.toFixed(1)+'" y="'+gy.toFixed(1)+'" width="'+gs.toFixed(1)+'" height="'+gs.toFixed(1)+'" rx="1" fill="rgba(201,160,52,0.85)"/>';
+    }
+  }
+  // playtest tell: a small gold moon in the top corner
+  if(playtest){
+    svg += crescentSVG(W-16, 15, 6, 'rgba(201,160,52,0.95)', '#8E6F42');
+  }
+  // invisible per-peg hit areas for the 4-3-2-1 unlock-all gesture
+  RACK_PEGS.forEach((p,i)=>{
+    const px = xs[i], w = (W-60)/RACK_PEGS.length;
+    svg += '<rect class="pegHit" data-peg="'+i+'" x="'+(px-w/2)+'" y="0" width="'+w+'" height="'+Hh+'" fill="transparent"/>';
+  });
+  svg += '</svg>';
+  return svg;
+}
+
+/* Any card can ask for a rack by including <div class="rackHost" data-...>.
+   mountRacks fills each one and wires the sealed-mode gesture.            */
+let rackTaps = [];
+function mountRacks(){
+  const hosts = panelEl.querySelectorAll('.rackHost');
+  hosts.forEach(host=>{
+    const golden = host.getAttribute('data-golden')==='1';
+    const hi = host.getAttribute('data-highlight');
+    const highlight = new Set(hi? hi.split(',').filter(Boolean) : []);
+    host.innerHTML = buildRackSVG({ golden, highlight });
+    host.querySelectorAll('.pegHit').forEach(rect=>{
+      rect.addEventListener('pointerdown', e=>{
+        e.stopPropagation();
+        onRackPeg(Number(rect.getAttribute('data-peg')));
+      });
+    });
+  });
+}
+/* The rack gesture (door three): tap the pegs 4-3-2-1 within four seconds. */
+function onRackPeg(idx){
+  const now = performance.now();
+  rackTaps = rackTaps.filter(t=> now - t.t < 4000);
+  rackTaps.push({ i: idx, t: now });
+  const want = [3,2,1,0];
+  const tail = rackTaps.slice(-4).map(x=> x.i);
+  if(tail.length===4 && tail.every((v,k)=> v===want[k])){
+    rackTaps = [];
+    setPlaytest(!playtest);
+    // re-render whatever card is showing so the tell appears/disappears
+    if(G.phase==='picker') showPicker();
+    else mountRacks();
+  }
+}
 /* World picker: green = Tunnels, red = The Hat, chord = same as last time.
    The buttons teach themselves. Exists only once the ritual has earned it. */
 function showPicker(){
   G.phase = 'picker';
   G.pendingSide = null; G.pendingMs = 0;
+  // §11: the rack is the picker. Worlds Three & Four aren't built yet, so
+  // their pegs show as silhouettes filling at 10 / 15 days; the two built
+  // worlds stay on the green/red choice until the N-world picker (§14.5)
+  // and those worlds land.
+  const rack = rackVisible()? '<div class="rackHost"></div>' : '';
   showPanel(
+    rack +
     '<h1>Where today?</h1>'+
     '<p class="vocab"><b class="g">Green</b> &mdash; Tunnels<br><b class="r">Red</b> &mdash; The Hat</p>'+
     '<p class="hint">Both together &mdash; same as last time</p>'
@@ -2517,7 +2876,10 @@ function bothPressCheck(){
   G.bothArmed = false;
   if(G.phase==='briefing') startStage();
   else if(G.phase==='reveal') nextAfterReveal();
-  else if(G.phase==='runComplete') newRun();
+  else if(G.phase==='runComplete'){
+    if(G.rcPhase==='ceremony') showRunStats(); // §11: rack ceremony → stats
+    else newRun();
+  }
 }
 
 function bindButton(el, side){
@@ -2546,7 +2908,7 @@ bindButton(btnRight, 'right');
 
 // Accidental exits are catastrophic mid-stage: swallow touches outside the buttons.
 document.addEventListener('touchstart', e=>{
-  if(!e.target.closest('#controls button') && !e.target.closest('#dev')) e.preventDefault();
+  if(!e.target.closest('#controls button') && !e.target.closest('#dev') && !e.target.closest('.rackHost')) e.preventDefault();
 }, {passive:false});
 document.addEventListener('gesturestart', e=> e.preventDefault());
 
@@ -2602,9 +2964,15 @@ function buildDevPanel(){
     '<button id="devSave">Save &amp; apply</button>'+
     '<button id="devReset">Reset to defaults</button>'+
     '<button id="devExport">Export config as JSON</button>'+
+    '<button id="devPlaytest">'+(playtest?'Put the hats back':'Take all the hats down')+'</button>'+
     '<button id="devClose">Close</button></div>'+
     '<textarea id="devOut" readonly placeholder="Exported JSON appears here"></textarea>';
   devEl.innerHTML = html;
+  // §11 playtest door two: toggle the sealed unlock-everything mode
+  document.getElementById('devPlaytest').onclick = ()=>{
+    setPlaytest(!playtest);
+    buildDevPanel();
+  };
   document.getElementById('devSave').onclick = ()=>{
     for(const k of Object.keys(CONFIG_DEFAULTS)){
       const el = document.getElementById('cfg-'+k);
@@ -2648,8 +3016,9 @@ G.runSeed = dailySeed();
 const lastWorld = LS.get('lastWorld', 'tunnels');
 G.world = WORLDS[lastWorld]? lastWorld : 'tunnels';
 setupStage(0);
-// World Two exists only after the ritual has earned it; until then, no picker
-if(LS.get('runs', 0) >= CONFIG.hatUnlockRuns) showPicker();
+// §11: worlds unlock on DAYS PLAYED, not runs. The picker appears once The
+// Hat is earned (5 days) — or immediately in sealed playtest mode.
+if(playtest || getDaysPlayed() >= worldUnlockDay('hat')) showPicker();
 
 function frame(now){
   const dt = Math.min(100, now - lastT);
@@ -2666,7 +3035,11 @@ window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
   dailySeed, generateStageRows, validateStage, solveMaze, chooseWorld,
   generateHatStage, placeLandmarks, LANDMARK_KINDS, placeGems, mazeRouteCells,
   advanceStreak, currentStreak, effectiveGenParams, dayNumber,
-  appendJournal, dateStamp, topDownHat };
+  appendJournal, dateStamp, topDownHat,
+  // §11 — the hat rack, days played, par & the golden night, playtest
+  getDaysPlayed, worldUnlockDay, isUnlocked, rackVisible, updateProgression,
+  stageParMs, newlyUnlocked, buildRackSVG, RACK_PEGS,
+  setPlaytest, get playtest(){ return playtest; } };
 </script>
 </body>
 </html>
