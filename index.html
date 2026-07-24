@@ -215,6 +215,18 @@ const CONFIG_DEFAULTS = {
   // playtest (Marty only) — URL ?unlockAll=1, dev panel, or the 4-3-2-1 gesture
   unlockAll: false,
   playtestSuppressesWrites: true,
+  // World Three — The Forest (§12): two legs and a red page. Chord-only
+  // junctions (the load-bearing constraint), a polite turnaround at animals,
+  // and the run back up the same maze the wrong-arm way.
+  forestWalkSpeed: 0.9,          // the bear's plod (tiles/sec) on the way down
+  forestReturnSpeedMult: 1.4,    // faster on the run back — he knows where he's going
+  forestRedPageMs: 1400,         // the full-bleed red beat ("He knows where his hat is.")
+  forestAnimalCount: 4,          // animals seated at arm tips (rabbit + sleeper + others)
+  forestSpeechMode: 'pictures',  // 'pictures' (pictograms) | 'words' (NO / OK)
+  speakerLineMs: 1800,           // how long an animal's bubble holds before the turnaround
+  forestShowRabbitOnReturn: false, // keep the rabbit hidden on leg 2 (she must remember)
+  forestHintAfterBumps: 3,       // after this many wrong arms, the rabbit flickers back
+  planTraceOnReturnLeg: true,    // the world the plan trace was invented for (trace pending)
   // feel & pacing (v1)
   bounceSpeedMult: 2.5,     // how fast the digger slides back after a bump
   junctionRecueMs: 5000,    // gentle "still waiting" cue for the eyes-closed Driver
@@ -846,6 +858,11 @@ const AudioFX = (function(){
       tone(1047, 480, {type:'sine', vol:0.2, delayMs:notes.length*130});
     },
     chime(){ tone(880, 200, {type:'sine', vol:0.14}); tone(1175, 260, {type:'sine', vol:0.12, delayMs:90}); },
+    redPage(){ // §12: the forest's big beat — a low, certain swell, not a scare
+      tone(196, 900, {type:'sine', vol:0.30, slideTo:262});
+      tone(98, 1000, {type:'triangle', vol:0.16, slideTo:131});
+      tone(392, 700, {type:'sine', vol:0.10, delayMs:220});
+    },
     golden(){ // §11: a rising two-note chime — a golden night knows itself by sound alone
       tone(784, 260, {type:'sine', vol:0.22});
       tone(1319, 520, {type:'sine', vol:0.20, delayMs:200});
@@ -908,6 +925,7 @@ function parseStage(stage){
     start, exit,
     landmarks: stage.landmarks || null,  // World Two: nameable places
     decor: stage.decor || null,          // World Two: silent jokes
+    forest: stage.forest || null,        // World Three: the cast + the rabbit's arm
     // a world may enter from the surface (dig down) or the near edge (walk up)
     startHeading: (start && start.r === grid.length-1)? {dx:0,dy:-1} : {dx:0,dy:1},
     isOpen(c,r){
@@ -941,6 +959,7 @@ const G = {
   stagePars: [],       // per-stage par time (ms) for the golden-night check (§11)
   rcPhase: 'stats',    // run-complete sub-step: 'ceremony' (rack) then 'stats'
   rcRack: null,        // ceremony payload while rcPhase==='ceremony'
+  pickerWorlds: ['tunnels'], pickerIdx: 0, // the N-world picker (§14.5)
   countdownT: 0, bannerT: 0, stunT: 0, stunAfter: null,
   bouncePath: null, bounceIdx: 0, bounceT: 0,
   junctionWaitMs: 0, recueMs: 0,
@@ -951,6 +970,16 @@ const G = {
   dogFacing: 1, dogPrev: null,
   treasure: [],        // decorative gems/gold in the walls — never collectible
   snackT: 0,           // run-complete snack scene timer
+  // World Three — the two legs and the red page (§12)
+  leg: 1,              // 1 = the search (down), 2 = the run back (up)
+  forest: null,        // {animals, deer, rabbitArm} for this stage
+  traceLeg1: [],       // leg-1 path, kept for the two-weight reveal
+  legParExtra: 0,      // leg-1 par time, added to the stage par at reveal
+  leg2Bumps: 0,        // wrong arms on the run back — drives the rabbit hint
+  hintRabbit: false,   // once true, the rabbit flickers back on leg 2
+  speaker: null,       // {cell, kind, t} — the current animal's bubble
+  speakAfter: null,    // 'turnaround' | 'redpage'
+  redPageT: 0,         // the full-bleed red beat timer
   watcherAng: -Math.PI/2, // the Watcher tortoise's slow head
   particles: [],
   bothArmed: true,     // require full release between both-press triggers
@@ -1047,6 +1076,35 @@ const WORLDS = {
     drawAvatar: (x, y, now)=> drawSeeker(x, y, now),
     rewardLine: 'Off into the stars',
     reward: (now)=> drawSpaceScene(now),               // both tortoises, hatted, in space
+  },
+
+  /* World Three — THE FOREST. Elevation forest floor; the bear searches down,
+     then runs back up the same maze. Chord-only junctions, animals at the arm
+     tips, a red page at the bottom. The cast replaces the dog. */
+  forest: {
+    label: 'The Forest',
+    companion: false,  // the animals replace the dog
+    hasGems: false,
+    bumpNoun: 'Bumps',
+    bumpDry: false,    // a thud into a trunk
+    multiLeg: true,    // the engine runs two legs and a cinematic beat between
+    dugColour: '#D3C4A2', // the trodden forest floor — never World One's tan
+    dust: '#8A9468', burst: ['#8A9468','#EFE7D6'],
+    speed: ()=> speedWithNotch(CONFIG.forestWalkSpeed),
+    stageFor: (idx)=> forestStageFor(idx),
+    topStrip: ()=> Math.max(22, Math.round(H*0.06)),   // a thin canopy band
+    bottomStrip: ()=> 0,
+    buildStatic: (s, rnd, m)=> buildStaticForest(s, rnd, m),
+    drawExtras: (now)=> drawForestExtras(now),
+    drawExitMarker: (now)=> drawForestExitMarker(now),
+    drawTrail: ()=> drawForestTrail(),
+    drawWaiting: (now)=>{
+      const s0 = cellCenter(G.maze.start.c, G.maze.start.r);
+      drawBear(s0.x, s0.y - cs*0.08, now);
+    },
+    drawAvatar: (x, y, now)=> drawBear(x, y, now),
+    rewardLine: 'He has his hat.',
+    reward: (now)=> drawForestReward(now),
   },
 };
 function WORLD(){ return WORLDS[G.world]; }
@@ -1173,6 +1231,131 @@ function hatStageFor(idx){
                    landmarks: gen.landmarks, decor: gen.decor };
   return { name:'Stage '+(idx+1), rows: HAT_STAGES[idx].rows, generated:false,
            landmarks: HAT_LANDMARKS[idx], decor: HAT_DECOR[idx] };
+}
+
+/* ---------------- World Three data — THE FOREST (§12) ---------------------
+   One maze, walked twice. Leg 1: the bear enters at the top and searches DOWN
+   the spine; animals sit at the tips of the side arms and the deer waits at
+   the bottom. Leg 2: the run back UP the same maze to the rabbit's arm — no
+   new maze, just start/exit swapped. The load-bearing constraint is that every
+   junction is a CHORD (route straight down the spine, arms to one side): a
+   chord leaves vertically, so the return enters vertically and the calls stay
+   exactly green / red / both in both legs. Chord-only mazes are a straight
+   vertical spine with horizontal dead-end arms — the generator already makes
+   them (chordShare:1); these hand-authored fallbacks are the never-broken
+   floor, and each is validated as a chord-only tree.                        */
+const FOREST_STAGES = [
+  { name:'Stage 1', rows:[
+    '####S####',
+    '####.####',
+    '##...####',   // junction: arm left to the sleeper
+    '####.####',
+    '####.####',
+    '####...##',   // junction: arm right to the rabbit
+    '####.####',
+    '####.####',
+    '####.####',
+    '####E####',   // the deer, at the foot of the spine
+  ]},
+  { name:'Stage 2', rows:[
+    '####S####',
+    '####.####',
+    '##...####',
+    '####.####',
+    '####...##',
+    '####.####',
+    '#....####',   // a deeper arm
+    '####.####',
+    '####..###',
+    '####.####',
+    '####.####',
+    '####E####',
+  ]},
+  { name:'Stage 3', rows:[
+    '####S####',
+    '####.####',
+    '##...####',
+    '####.####',
+    '####...##',
+    '####.####',
+    '#....####',
+    '####.####',
+    '####...##',
+    '####.####',
+    '##...####',
+    '####.####',
+    '####..###',
+    '####.####',
+    '####.####',
+    '####E####',
+  ]},
+];
+
+/* Which arm tip holds the rabbit (leg-2 goal), which the sleeper, and where
+   the deer sits (the leg-1 exit). Tips are given as {c,r}; the rest of the
+   cast fills the remaining arms with deadpan deny/ask animals.              */
+const FOREST_FALLBACK_CAST = [
+  { animals:[ {c:6,r:5,kind:'rabbit',isRabbit:true}, {c:2,r:2,kind:'sleeper'} ],
+    deer:{c:4,r:9}, rabbitArm:{c:6,r:5} },
+  { animals:[ {c:1,r:6,kind:'rabbit',isRabbit:true}, {c:6,r:4,kind:'sleeper'},
+              {c:2,r:2,kind:'deny'}, {c:5,r:8,kind:'ask'} ],
+    deer:{c:4,r:11}, rabbitArm:{c:1,r:6} },
+  { animals:[ {c:5,r:12,kind:'rabbit',isRabbit:true}, {c:1,r:6,kind:'sleeper'},
+              {c:2,r:2,kind:'deny'}, {c:6,r:4,kind:'ask'},
+              {c:6,r:8,kind:'deny'}, {c:2,r:10,kind:'ask'} ],
+    deer:{c:4,r:15}, rabbitArm:{c:5,r:12} },
+];
+const FOREST_SEED_SALT = 0x464F5245; // 'FORE' — the forest's own stream off the daily seed
+
+/* Forest stages are chord-only; otherwise the streak-notch ramp is shared. */
+function effectiveForestParams(idx){
+  const p = effectiveGenParams(idx);
+  p.chordShare = 1;   // the whole world hangs on this (§12)
+  return p;
+}
+
+/* Seat the cast on a generated chord-only maze: the arm tips (degree-1 open
+   cells that aren't the surface start or the deer at the exit) get animals.
+   One arm is the rabbit (its tip is leg 2's goal), one the sleeper, the rest
+   deny/ask up to forestAnimalCount; any arms beyond that stay bare trees —
+   an ordinary bump. Returns null if there's no arm to hide the rabbit in.   */
+function placeForestCast(rowsArr, rnd){
+  const m = parseStage({name:'', rows: rowsArr});
+  const isEnd = (c,r)=> (c===m.start.c&&r===m.start.r)||(c===m.exit.c&&r===m.exit.r);
+  const deg = (c,r)=> [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx,dy])=>m.isOpen(c+dx,r+dy)).length;
+  const tips = [];
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(m.isOpen(c,r) && !isEnd(c,r) && deg(c,r)===1) tips.push({c,r});
+  }
+  if(!tips.length) return null;
+  const sh = tips.slice();
+  for(let i=sh.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); const t=sh[i]; sh[i]=sh[j]; sh[j]=t; }
+  const animals = [];
+  animals.push({ c:sh[0].c, r:sh[0].r, kind:'rabbit', isRabbit:true });
+  if(sh[1]) animals.push({ c:sh[1].c, r:sh[1].r, kind:'sleeper' });
+  const cap = Math.max(2, CONFIG.forestAnimalCount);
+  for(let i=2;i<sh.length && animals.length<cap;i++){
+    animals.push({ c:sh[i].c, r:sh[i].r, kind:(i%2? 'ask':'deny') });
+  }
+  return { animals, deer:{c:m.exit.c, r:m.exit.r}, rabbitArm:{c:sh[0].c, r:sh[0].r} };
+}
+
+function generateForestStage(idx, dailySeedVal, params){
+  for(let a=0;a<16;a++){
+    const rows = generateStageRows(idx, hash32(dailySeedVal ^ FOREST_SEED_SALT, a*6151), params);
+    if(!rows) continue;
+    const rnd = mulberry32(hash32(dailySeedVal, FOREST_SEED_SALT + idx*89 + a));
+    const cast = placeForestCast(rows, rnd);
+    if(cast) return { rows, forest: cast };
+  }
+  return null;
+}
+
+function forestStageFor(idx){
+  const gen = generateForestStage(idx, G.runSeed, effectiveForestParams(idx));
+  if(gen) return { name:'Stage '+(idx+1), rows: gen.rows, generated:true, forest: gen.forest };
+  return { name:'Stage '+(idx+1), rows: FOREST_STAGES[idx].rows, generated:false,
+           forest: FOREST_FALLBACK_CAST[idx] };
 }
 
 /* ---------------- Static layer dispatch ---------------------------------- */
@@ -1365,6 +1548,14 @@ function setupStage(idx){
     : [];
   G.gemsThisStage = 0;
   G.stageMs = 0;
+  // World Three: both legs live in one stage; reset the leg bookkeeping
+  G.leg = 1;
+  G.forest = G.maze.forest;
+  G.traceLeg1 = [];
+  G.legParExtra = 0;
+  G.leg2Bumps = 0;
+  G.hintRabbit = false;
+  G.speaker = null; G.speakAfter = null;
   G.helmetSlip = false;
   G.facing = 1;
   G.crumbs = []; G.dogPrev = null; G.dogFacing = 1;
@@ -1410,14 +1601,89 @@ function arriveAt(cell){
   }
 
   const m = G.maze;
-  if(cell.c===m.exit.c && cell.r===m.exit.r){ breakthrough(); return; }
+  if(cell.c===m.exit.c && cell.r===m.exit.r){ reachGoal(); return; }
 
   const ahead = G.heading, left = turnLeft(G.heading), right = turnRight(G.heading);
   const options = [ahead, left, right].filter(d=> m.isOpen(cell.c+d.dx, cell.r+d.dy));
 
-  if(options.length===0){ deadEndBump(); }
+  if(options.length===0){
+    // World Three, leg 1: an arm tip holding an animal is a conversation, not
+    // a bump — the bear asks, then turns politely back. Bare arms still bump.
+    if(WORLD().multiLeg && G.leg===1){
+      const an = forestAnimalAt(cell);
+      if(an){ meetAnimal(an); return; }
+    }
+    deadEndBump();
+  }
   else if(options.length===1){ G.heading = options[0]; beginMove(); } // corners auto-turn
   else{ enterJunction(); }
+}
+
+/* Reaching the goal cell. In a single-leg world it's the breakthrough. In the
+   forest it's the deer at the foot of leg 1 (→ the red page) or the rabbit's
+   arm at the top of leg 2 (→ the real breakthrough). */
+function reachGoal(){
+  if(WORLD().multiLeg && G.leg===1){ startDeerBeat(); }
+  else breakthrough();
+}
+
+/* ---------------- World Three: the two legs & the red page (§12) ---------- */
+function forestAnimalAt(cell){
+  if(!G.forest) return null;
+  return G.forest.animals.find(a=> a.c===cell.c && a.r===cell.r) || null;
+}
+
+/* Meeting an animal: the bear stops, a bubble holds, a soft chime marks it —
+   then a POLITE turnaround back to the junction. No bonk, no shake, no bump. */
+function meetAnimal(an){
+  G.speaker = { cell:{...G.cell}, kind:an.kind, t:0 };
+  G.speakAfter = 'turnaround';
+  G.phase = 'speaking';
+  AudioFX.chime();
+  buzz(30);
+}
+
+/* The deer beat: the deer shows an empty hat outline, the bear fills it red —
+   two identical silhouettes, and then he knows. Holds, then the red page. */
+function startDeerBeat(){
+  G.speaker = { cell:{...G.cell}, kind:'deer', t:0 };
+  G.speakAfter = 'redpage';
+  G.phase = 'speaking';
+  AudioFX.chime();
+  buzz(40);
+}
+
+/* The polite turnaround reuses the bounce path but skips the bump entirely. */
+function politeReturn(){ startBounce(); }
+
+/* The full-bleed red page: "He knows where his hat is." The longest haptic in
+   the game. A solid hold (never a strobe) — reduced motion just drops the
+   text fade. Clears into leg 2, the bear facing up. */
+function startRedPage(){
+  G.speaker = null;
+  G.phase = 'redpage';
+  G.redPageT = CONFIG.forestRedPageMs;
+  AudioFX.redPage();
+  buzz([700]);
+}
+
+function beginLeg2(){
+  // Leg 2 is the same maze, start and exit swapped: enter at the deer cell
+  // heading up, goal is the rabbit's arm tip. The trodden path stays drawn
+  // (the forest doesn't forget) so the dug set is kept.
+  G.traceLeg1 = G.trace.slice();
+  G.legParExtra = stageParMs(G.maze, G.digSpeed); // leg-1 par, banked for the reveal
+  G.leg = 2;
+  G.digSpeed = WORLD().speed() * CONFIG.forestReturnSpeedMult;
+  G.maze.start = {...G.forest.deer};
+  G.maze.exit  = {...G.forest.rabbitArm};
+  G.cell = {...G.forest.deer};
+  G.heading = {...DIRS.up};
+  G.trace = [{...G.cell}];
+  G.sinceJunction = [{...G.cell}];
+  G.lastJunction = null;
+  G.speaker = null; G.speakAfter = null;
+  beginMove();
 }
 
 function enterJunction(){
@@ -1470,6 +1736,11 @@ function bumpFX(){
 
 function deadEndBump(){
   G.bumps.push({...G.cell});
+  // §12: wrong arms on the run back earn a gentle hint after a few tries
+  if(WORLD().multiLeg && G.leg===2){
+    G.leg2Bumps++;
+    if(G.leg2Bumps >= CONFIG.forestHintAfterBumps) G.hintRabbit = true;
+  }
   bumpFX();
   G.phase = 'stunned';
   G.stunT = CONFIG.bumpStunMs;
@@ -1515,7 +1786,9 @@ function showReveal(){
   G.stageTimes.push(G.stageMs);
   G.stageBumpCounts.push(G.bumps.length);
   G.stageGemCounts.push(G.gemsThisStage);
-  G.stagePars.push(stageParMs(G.maze, G.digSpeed)); // §11: par is time underground
+  // §11: par is time underground. In the forest, add leg 1's banked par to the
+  // leg-2 maze's par so a two-leg stage is judged on the whole journey.
+  G.stagePars.push(stageParMs(G.maze, G.digSpeed) + (G.legParExtra || 0));
   const gemLine = (WORLD().hasGems && G.gems.length)
     ? '<p class="vocab">Found '+G.gemsThisStage+' of '+G.gems.length+' gems &#9670;</p>' : '';
   showPanel(
@@ -1640,21 +1913,27 @@ function renderRunThumbnail(){
   cv.width = m.cols*cell + pad*2;
   cv.height = m.rowsN*cell + pad*2;
   const t = cv.getContext('2d');
-  const hat = (G.world==='hat');
-  t.fillStyle = hat? HPAL.sand : PAL.soilDeep;
+  const hat = (G.world==='hat'), forest = (G.world==='forest');
+  t.fillStyle = forest? FPAL.bark : hat? HPAL.sand : PAL.soilDeep;
   t.fillRect(0,0,cv.width,cv.height);
-  t.fillStyle = hat? HPAL.path : PAL.tunnel;
+  t.fillStyle = forest? FPAL.floor : hat? HPAL.path : PAL.tunnel;
   for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
     if(m.isOpen(c,r)) t.fillRect(pad+c*cell, pad+r*cell, cell, cell);
   }
   const cx = (c)=> pad + c*cell + cell/2, cy = (r)=> pad + r*cell + cell/2;
-  if(G.trace.length > 1){ // the wobbly route, inked (dashed = footprints)
-    t.strokeStyle = PAL.gem; t.lineWidth = Math.max(1.5, cell*0.32);
-    t.lineJoin = 'round'; t.lineCap = 'round';
-    if(hat) t.setLineDash([cell*0.5, cell*0.4]);
+  const inkTrace = (trace, style, w)=>{
+    if(!trace || trace.length<2) return;
+    t.strokeStyle = style; t.lineWidth = w; t.lineJoin='round'; t.lineCap='round';
     t.beginPath();
-    G.trace.forEach((p,i)=>{ const x=cx(p.c), y=cy(p.r); i? t.lineTo(x,y) : t.moveTo(x,y); });
+    trace.forEach((p,i)=>{ const x=cx(p.c), y=cy(p.r); i? t.lineTo(x,y) : t.moveTo(x,y); });
     t.stroke();
+  };
+  if(forest){ // both legs — leg 1 soft grey, leg 2 charcoal (a different shape each day)
+    inkTrace(G.traceLeg1, 'rgba(233,231,214,0.5)', Math.max(1.5, cell*0.24));
+    inkTrace(G.trace,     FPAL.charcoal,           Math.max(1.5, cell*0.32));
+  }else if(G.trace.length > 1){ // the wobbly route, inked (dashed = footprints)
+    if(hat) t.setLineDash([cell*0.5, cell*0.4]);
+    inkTrace(G.trace, PAL.gem, Math.max(1.5, cell*0.32));
     t.setLineDash([]);
   }
   t.fillStyle = PAL.paper; // a star at every thud
@@ -1819,14 +2098,28 @@ function update(dt){
     G.bannerT -= dt;
     if(G.bannerT<=0) showReveal();
   }
+  else if(G.phase==='speaking'){       // §12: an animal's bubble holds, then acts
+    G.speaker.t += dt;
+    if(G.speaker.t >= CONFIG.speakerLineMs){
+      const after = G.speakAfter;
+      G.speaker = null; G.speakAfter = null;
+      if(after==='redpage') startRedPage();
+      else politeReturn();
+    }
+  }
+  else if(G.phase==='redpage'){        // §12: the full-bleed red beat, then leg 2
+    G.redPageT -= dt;
+    if(G.redPageT<=0) beginLeg2();
+  }
   else if(G.phase==='runComplete'){
     G.snackT += dt;
   }
   else if(G.phase==='picker' && G.pendingSide){
     G.pendingMs += dt;
     if(G.pendingMs >= CONFIG.chordWindowMs){
-      const side = G.pendingSide;
-      chooseWorld(side==='left'? 'tunnels' : 'hat');
+      const side = G.pendingSide; G.pendingSide = null;
+      if(G.pickerWorlds.length > 2) stepPicker(side==='left'? -1 : 1);
+      else chooseWorld(side==='left'? G.pickerWorlds[0] : (G.pickerWorlds[1] || G.pickerWorlds[0]));
     }
   }
 
@@ -1864,8 +2157,8 @@ function render(now){
 
   if(staticLayer) ctx.drawImage(staticLayer, 0, 0, W, H);
 
-  // dug tunnel — visibly lighter, like exposed dry dirt
-  ctx.fillStyle = PAL.tunnel;
+  // dug tunnel / trodden trail — visibly lighter, like exposed dry dirt
+  ctx.fillStyle = WORLD().dugColour || PAL.tunnel;
   G.dug.forEach(k=>{
     const [c,r] = k.split(',').map(Number);
     ctx.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
@@ -1901,6 +2194,7 @@ function render(now){
   ctx.globalAlpha = 1;
 
   if(G.phase==='runComplete') WORLD().reward(now);
+  if(G.phase==='redpage') drawForestRedPage(now); // §12: covers everything
 
   if(CONFIG.debugOverlay) drawDebug();
 }
@@ -2635,6 +2929,325 @@ function drawSpaceScene(now){
 }
 /* ================= end World Two drawing ================================= */
 
+/* ================= World Three — THE FOREST: drawing (§12) ===============
+   Elevation, on the forest floor. Tree trunks are the impassable walls; the
+   one saturated red belongs to the hat and only the hat. The reveal inks two
+   weights — leg 1 soft grey, leg 2 charcoal — so the whole there-and-back is
+   visible at a glance. Homage in spirit; all original assets.             */
+const FPAL = {
+  ivory:'#EFE7D6', floor:'#E4D9C2', bark:'#6B5A44', barkDark:'#5A4A38',
+  canopy:'#6C7A55', moss:'#8A9468', hat:'#B23A48', charcoal:'#33291F',
+  fur:'#7A5C3E', furDark:'#5E442C', muzzle:'#B49A7A',
+  rabbit:'#CFC3AD', rabbitDark:'#AEA089',
+  critterA:'#A98B5E', critterB:'#8E9A6A', bubble:'#F6F0E2',
+};
+
+function buildStaticForest(s, rnd, m){
+  G.treasure = []; // no buried fortunes in the forest
+  // a thin canopy band, dappled
+  s.fillStyle = FPAL.canopy; s.fillRect(0,0,W,skyH);
+  s.globalAlpha = 0.22;
+  for(let i=0;i<W/16;i++){ s.fillStyle = rnd()<0.5? FPAL.moss : '#5C6A48';
+    s.beginPath(); s.arc(rnd()*W, rnd()*skyH, 2+rnd()*3, 0, Math.PI*2); s.fill(); }
+  s.globalAlpha = 1;
+
+  // the forest floor — warm ivory, paler than World One's soil (air, not earth)
+  s.fillStyle = FPAL.ivory; s.fillRect(0, skyH, W, H-skyH);
+  s.strokeStyle = 'rgba(51,41,31,0.18)'; s.lineWidth = 1;
+  s.beginPath(); s.moveTo(0, skyH+0.5); s.lineTo(W, skyH+0.5); s.stroke();
+
+  // trodden corridors — the map the Navigator reads
+  s.fillStyle = FPAL.floor;
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(m.isOpen(c,r)) s.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
+  }
+
+  // tree-trunk walls — flat vertical bands in two greens and a grey-brown,
+  // coloured per column so a run of wall cells reads as one continuous trunk
+  const barks = [FPAL.bark, FPAL.canopy, FPAL.moss];
+  const colCol = []; for(let c=0;c<m.cols;c++) colCol[c] = barks[Math.floor(rnd()*barks.length)];
+  for(let c=0;c<m.cols;c++) for(let r=0;r<m.rowsN;r++){
+    if(m.isOpen(c,r)) continue;
+    s.fillStyle = colCol[c];
+    s.fillRect(ox+c*cs, oy+r*cs, cs, cs);
+    // a soft darker seam on the left edge gives the trunk a little round
+    s.fillStyle = 'rgba(51,41,31,0.10)';
+    s.fillRect(ox+c*cs, oy+r*cs, Math.max(1,cs*0.12), cs);
+    // occasional root wedge at a trunk's foot (only where floor is below)
+    if(m.isOpen(c,r+1) && rnd()<0.5){
+      s.fillStyle = FPAL.barkDark;
+      const bx = ox+c*cs+cs/2, byy = oy+(r+1)*cs;
+      s.beginPath(); s.moveTo(bx-cs*0.4, byy); s.lineTo(bx+cs*0.4, byy);
+      s.lineTo(bx+cs*0.12, byy-cs*0.22); s.lineTo(bx-cs*0.12, byy-cs*0.22); s.closePath(); s.fill();
+    }
+  }
+
+  // paper grain
+  s.globalAlpha = 0.05;
+  for(let i=0;i<W*H/160;i++){ s.fillStyle = rnd()<0.5? '#000':'#fff'; s.fillRect(rnd()*W, rnd()*H, 1, 1); }
+  s.globalAlpha = 1;
+}
+
+/* The bear: large, upright, mirrored not rotated (elevation rules), one dot
+   eye, no expression at any point including the end. */
+function drawBear(x, y, now){
+  const s = cs*0.7;   // he fills more of a cell than the digger — that's the joke
+  const walking = G.phase==='digging' || G.phase==='bouncing';
+  const plod = (!reducedMotion && walking)? Math.sin(now/170)*s*0.04 : 0;
+  const step = (!reducedMotion && walking)? Math.sin(now/170)*s*0.10 : 0;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(G.facing, 1);
+  ctx.translate(0, plod);
+  ctx.strokeStyle = FPAL.furDark; ctx.lineWidth = Math.max(2, s*0.16); ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-s*0.16, s*0.28); ctx.lineTo(-s*0.20 - step, s*0.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( s*0.16, s*0.28); ctx.lineTo( s*0.20 + step, s*0.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-s*0.28, -s*0.02); ctx.lineTo(-s*0.34 + step, s*0.2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( s*0.28, -s*0.02); ctx.lineTo( s*0.34 - step, s*0.2); ctx.stroke();
+  ctx.fillStyle = FPAL.fur;
+  roundedRect(-s*0.30, -s*0.26, s*0.60, s*0.60, s*0.24);
+  ctx.beginPath(); ctx.arc(0, -s*0.42, s*0.28, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-s*0.20, -s*0.60, s*0.11, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc( s*0.20, -s*0.60, s*0.11, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = FPAL.muzzle;
+  ctx.beginPath(); ctx.ellipse(s*0.08, -s*0.34, s*0.14, s*0.10, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = PAL.ink;
+  ctx.beginPath(); ctx.arc(s*0.16, -s*0.38, s*0.03, 0, Math.PI*2); ctx.fill(); // nose
+  if(!G.helmetSlip){ ctx.beginPath(); ctx.arc(s*0.10, -s*0.50, s*0.03, 0, Math.PI*2); ctx.fill(); } // one eye
+  ctx.restore();
+}
+
+function drawForestExtras(now){
+  const staged = G.phase!=='reveal' && G.phase!=='runComplete';
+  if(G.leg===1 && staged && G.forest){
+    G.forest.animals.forEach(a=> drawAnimal(a.c, a.r, a.kind, now, false));
+  }
+  // the run back: the animals are gone. The rabbit only flickers back as a hint.
+  if(G.leg===2 && staged && G.forest && (CONFIG.forestShowRabbitOnReturn || G.hintRabbit)){
+    const ra = G.forest.rabbitArm; drawAnimal(ra.c, ra.r, 'rabbit', now, false);
+  }
+  if(G.speaker) drawSpeechBubble(now);
+}
+
+function drawForestExitMarker(now){
+  if(G.leg!==1 || !G.forest) return;                 // leg 2's goal is unmarked (the point)
+  if(G.phase==='reveal' || G.phase==='runComplete') return;
+  drawAnimal(G.forest.deer.c, G.forest.deer.r, 'deer', now, false);
+}
+
+/* A red pointy hat, elevation — a soft triangle with a little brim. The one
+   saturated colour in the forest. Shared by the rabbit, the pictograms, and
+   the bear's final hat. */
+function forestPointyHat(g, cx, by, s, opts){
+  opts = opts || {};
+  g.beginPath();
+  g.moveTo(cx, by - s*0.92);
+  g.quadraticCurveTo(cx + s*0.18, by - s*0.42, cx + s*0.40, by);
+  g.lineTo(cx - s*0.40, by);
+  g.quadraticCurveTo(cx - s*0.18, by - s*0.42, cx, by - s*0.92);
+  g.closePath();
+  if(opts.outline){ g.strokeStyle = opts.stroke || FPAL.charcoal; g.lineWidth = opts.lw || 2; g.stroke(); }
+  else { g.fillStyle = opts.fill || FPAL.hat; g.fill(); }
+}
+
+function drawAnimal(c, r, kind, now, hatless){
+  const p = cellCenter(c, r);
+  const s = cs*0.42;
+  ctx.save();
+  ctx.translate(p.x, p.y + cs*0.06);
+  if(kind==='rabbit'){
+    ctx.fillStyle = FPAL.rabbit;
+    ctx.beginPath(); ctx.ellipse(0, s*0.02, s*0.28, s*0.42, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, -s*0.40, s*0.24, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = FPAL.rabbitDark;
+    ctx.beginPath(); ctx.ellipse(-s*0.12, -s*0.72, s*0.07, s*0.24, -0.15, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse( s*0.12, -s*0.72, s*0.07, s*0.24,  0.15, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = PAL.ink;
+    ctx.beginPath(); ctx.arc(s*0.09, -s*0.42, s*0.03, 0, Math.PI*2); ctx.fill();
+    if(!hatless) forestPointyHat(ctx, 0, -s*0.56, s*0.34);
+  }else if(kind==='sleeper'){
+    ctx.fillStyle = FPAL.critterB;
+    ctx.beginPath(); ctx.ellipse(0, 0, s*0.40, s*0.30, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(s*0.34, -s*0.06, s*0.16, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = PAL.ink; ctx.lineWidth = Math.max(1, s*0.04); ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.arc(s*0.36, -s*0.08, s*0.05, 0.15, Math.PI-0.15); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }else if(kind==='deer'){
+    ctx.fillStyle = FPAL.critterA;
+    ctx.beginPath(); ctx.ellipse(0, s*0.02, s*0.30, s*0.36, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s*0.02, -s*0.50, s*0.16, s*0.20, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = FPAL.critterA; ctx.lineWidth = Math.max(1, s*0.06); ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-s*0.05, -s*0.66); ctx.lineTo(-s*0.14, -s*0.88); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( s*0.09, -s*0.66); ctx.lineTo( s*0.18, -s*0.88); ctx.stroke();
+    ctx.fillStyle = PAL.ink; ctx.beginPath(); ctx.arc(s*0.08, -s*0.52, s*0.03, 0, Math.PI*2); ctx.fill();
+  }else{ // deny / ask — generic deadpan critters
+    ctx.fillStyle = kind==='ask'? FPAL.critterB : FPAL.critterA;
+    ctx.beginPath(); ctx.ellipse(0, 0, s*0.34, s*0.30, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(s*0.26, -s*0.18, s*0.16, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = PAL.ink; ctx.beginPath(); ctx.arc(s*0.30, -s*0.20, s*0.03, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function roundRectPath(x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r); ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+
+function forestBubble(cx, cy, w, drawInside){
+  const h = w*0.86, r = w*0.24;
+  ctx.save();
+  ctx.fillStyle = FPAL.bubble; ctx.strokeStyle = 'rgba(51,41,31,0.5)'; ctx.lineWidth = 1.5;
+  roundRectPath(cx-w/2, cy-h/2, w, h, r); ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - w*0.12, cy + h/2 - 2);
+  ctx.lineTo(cx, cy + h/2 + w*0.22);
+  ctx.lineTo(cx + w*0.02, cy + h/2 - 2);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+  drawInside(cx, cy, w*0.34);
+}
+
+/* The deer beat: the deer's empty hat outline, then the bear fills it red —
+   two identical silhouettes, side by side. The whole story in shape and
+   colour, nothing to read. */
+function drawSpeechBubble(now){
+  const sp = G.speaker;
+  const p = cellCenter(sp.cell.c, sp.cell.r);
+  const top = Math.max(skyH + cs*0.6, p.y - cs*0.95);
+  if(sp.kind==='deer'){
+    forestBubble(p.x - cs*0.55, top, cs*0.7, (bx,by,r)=> forestPointyHat(ctx, bx, by+r*0.5, r, {outline:true}));
+    forestBubble(p.x + cs*0.55, top, cs*0.7, (bx,by,r)=> forestPointyHat(ctx, bx, by+r*0.5, r));
+    return;
+  }
+  forestBubble(p.x, top, cs*0.82, (bx,by,r)=>{
+    if(CONFIG.forestSpeechMode==='words') drawBubbleWord(bx, by, r, sp.kind);
+    else drawBubblePicto(bx, by, r, sp.kind);
+  });
+}
+
+function drawBubblePicto(bx, by, r, kind){
+  const slash = (x,y,rr)=>{
+    ctx.strokeStyle = FPAL.charcoal; ctx.lineWidth = Math.max(1.5, rr*0.18); ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(x-rr*0.8, y+rr*0.7); ctx.lineTo(x+rr*0.8, y-rr*0.9); ctx.stroke();
+  };
+  if(kind==='rabbit'){
+    // three slashed hats, crammed in — protesting far too much
+    const pos = [[-0.55,0.12,0.5],[0.55,0.12,0.5],[0,-0.18,0.56]];
+    pos.forEach(([dx,dy,sc])=> forestPointyHat(ctx, bx+dx*r, by+dy*r + r*0.4, r*sc));
+    pos.forEach(([dx,dy,sc])=> slash(bx+dx*r, by+dy*r, r*sc));
+  }else if(kind==='ask'){
+    forestPointyHat(ctx, bx-r*0.2, by+r*0.5, r, {outline:true});
+    ctx.fillStyle = FPAL.charcoal; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font = '800 '+Math.round(r*1.1)+'px -apple-system, ui-rounded, system-ui, sans-serif';
+    ctx.fillText('?', bx+r*0.7, by-r*0.1);
+    ctx.textAlign='start'; ctx.textBaseline='alphabetic';
+  }else if(kind==='sleeper'){
+    ctx.strokeStyle = FPAL.charcoal; ctx.lineWidth = Math.max(1.5, r*0.12); ctx.lineCap='round';
+    ctx.beginPath(); ctx.arc(bx-r*0.25, by+r*0.1, r*0.35, 0.15, Math.PI-0.15); ctx.stroke();
+    ctx.fillStyle = FPAL.charcoal; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.font = '800 '+Math.round(r*0.95)+'px -apple-system, ui-rounded, system-ui, sans-serif';
+    ctx.fillText('z', bx+r*0.55, by-r*0.45);
+    ctx.textAlign='start'; ctx.textBaseline='alphabetic';
+  }else{ // deny — a slashed red hat
+    forestPointyHat(ctx, bx, by+r*0.5, r);
+    slash(bx, by, r);
+  }
+}
+
+function drawBubbleWord(bx, by, r, kind){
+  const word = kind==='sleeper'? 'z' : (kind==='ask'? 'OK' : 'NO');
+  ctx.fillStyle = FPAL.charcoal; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font = '800 '+Math.round(r*0.95)+'px -apple-system, ui-rounded, system-ui, sans-serif';
+  ctx.fillText(word, bx, by);
+  ctx.textAlign='start'; ctx.textBaseline='alphabetic';
+}
+
+/* The reveal: two weights. Leg 1 in soft grey, leg 2 in charcoal ink. */
+function strokeForestLine(traceArr, style, width){
+  if(!traceArr || traceArr.length<2) return;
+  ctx.strokeStyle = style; ctx.globalAlpha = 1;
+  ctx.lineWidth = width; ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.beginPath();
+  traceArr.forEach((cell,i)=>{
+    const p = cellCenter(cell.c, cell.r);
+    const x = p.x + wob(i), y = p.y + wob(i+511);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+}
+function drawForestTrail(){
+  strokeForestLine(G.traceLeg1, 'rgba(74,55,40,0.45)', Math.max(2, cs*0.10));
+  strokeForestLine(G.trace,     'rgba(51,41,31,0.85)', Math.max(2, cs*0.14));
+  drawBumpStars();
+  if(G.forest){
+    // the cast redrawn in place — the rabbit now hatless, the bear has it
+    G.forest.animals.forEach(a=> drawAnimal(a.c, a.r, a.kind, 0, !!a.isRabbit));
+    drawAnimal(G.forest.deer.c, G.forest.deer.r, 'deer', 0, false);
+  }
+}
+
+function drawForestRedPage(now){
+  ctx.fillStyle = FPAL.hat; ctx.fillRect(0, 0, W, H);
+  const a = reducedMotion? 1 : Math.min(1, (CONFIG.forestRedPageMs - G.redPageT)/300);
+  ctx.globalAlpha = a; ctx.fillStyle = FPAL.ivory;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  const fs = Math.round(Math.min(34, W*0.09));
+  ctx.font = '800 '+fs+'px -apple-system, ui-rounded, system-ui, sans-serif';
+  ctx.fillText('He knows where', W/2, H*0.44 - fs*0.7);
+  ctx.fillText('his hat is.',    W/2, H*0.44 + fs*0.7);
+  ctx.textAlign='start'; ctx.textBaseline='alphabetic'; ctx.globalAlpha = 1;
+}
+
+/* Run complete: the bear, sitting, wearing the red hat, facing the reader.
+   Deadpan. A squirrel wanders in and asks about a rabbit in a hat. Nothing is
+   explained. World Three signs off with a question nobody answers.         */
+function drawSittingBear(cx, by, s){
+  ctx.save(); ctx.translate(cx, by);
+  ctx.fillStyle = FPAL.fur;
+  ctx.beginPath(); ctx.ellipse(-s*0.40, -s*0.10, s*0.28, s*0.20, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( s*0.40, -s*0.10, s*0.28, s*0.20, 0, 0, Math.PI*2); ctx.fill();
+  roundedRect(-s*0.42, -s*0.78, s*0.84, s*0.72, s*0.30);
+  ctx.beginPath(); ctx.arc(0, -s*0.98, s*0.36, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-s*0.28, -s*1.24, s*0.14, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc( s*0.28, -s*1.24, s*0.14, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = FPAL.muzzle;
+  ctx.beginPath(); ctx.ellipse(0, -s*0.88, s*0.18, s*0.13, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = PAL.ink;
+  ctx.beginPath(); ctx.arc(-s*0.13, -s*1.02, s*0.035, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc( s*0.13, -s*1.02, s*0.035, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -s*0.90, s*0.05, 0, Math.PI*2); ctx.fill();
+  forestPointyHat(ctx, 0, -s*1.18, s*0.62);
+  ctx.restore();
+}
+function drawSquirrel(x, gy, s, now){
+  ctx.save(); ctx.translate(x, gy);
+  ctx.fillStyle = '#A56A3C';
+  ctx.beginPath(); ctx.ellipse(s*0.5, -s*0.5, s*0.30, s*0.5, 0.3, 0, Math.PI*2); ctx.fill(); // tail
+  ctx.beginPath(); ctx.ellipse(0, -s*0.4, s*0.28, s*0.40, 0, 0, Math.PI*2); ctx.fill();       // body
+  ctx.beginPath(); ctx.arc(-s*0.10, -s*0.80, s*0.20, 0, Math.PI*2); ctx.fill();               // head
+  ctx.beginPath(); ctx.moveTo(-s*0.20,-s*1.00); ctx.lineTo(-s*0.26,-s*1.16); ctx.lineTo(-s*0.08,-s*1.02); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = PAL.ink; ctx.beginPath(); ctx.arc(-s*0.16, -s*0.82, s*0.03, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function drawForestReward(now){
+  ctx.fillStyle = FPAL.ivory; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = FPAL.canopy; ctx.fillRect(0, 0, W, Math.max(30, H*0.10));
+  const gy = H*0.72;
+  ctx.strokeStyle = 'rgba(51,41,31,0.15)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+  const s = Math.min(56, W*0.16);
+  drawSittingBear(W*0.42, gy, s);
+  if(G.snackT > 700){
+    const prog = Math.min(1, (G.snackT-700)/1400);
+    drawSquirrel(W*0.9 - prog*(W*0.22), gy, s*0.5, now);
+  }
+}
+/* ================= end World Three drawing =============================== */
+
 function drawDebug(){
   const m = G.maze;
   ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -2736,6 +3349,11 @@ function buildRackSVG(opts){
     if(highlight.has(p.world)){ // ceremony ring behind the landing hat
       svg += '<circle cx="'+px+'" cy="'+(baseY-0.24*s)+'" r="'+(0.62*s)+'" fill="rgba(201,160,52,0.20)"/>';
     }
+    // §14.5: the picker's selection frame around the chosen unlocked peg
+    if(opts.select && opts.select===p.world){
+      svg += '<rect x="'+(px-0.62*s)+'" y="'+(baseY-0.98*s)+'" width="'+(1.24*s)+'" height="'+(1.2*s)+
+             '" rx="7" fill="none" stroke="#B23A48" stroke-width="2.5"/>';
+    }
     svg += hatShapeSVG(p.shape, px, baseY, s, p.colour, !unlocked);
     // the gold-moon tease beside the next locked peg (the bonus exists)
     if(i===nextIdx){
@@ -2784,7 +3402,8 @@ function mountRacks(){
     const golden = host.getAttribute('data-golden')==='1';
     const hi = host.getAttribute('data-highlight');
     const highlight = new Set(hi? hi.split(',').filter(Boolean) : []);
-    host.innerHTML = buildRackSVG({ golden, highlight });
+    const select = host.getAttribute('data-select') || null;
+    host.innerHTML = buildRackSVG({ golden, highlight, select });
     host.querySelectorAll('.pegHit').forEach(rect=>{
       rect.addEventListener('pointerdown', e=>{
         e.stopPropagation();
@@ -2808,22 +3427,60 @@ function onRackPeg(idx){
     else mountRacks();
   }
 }
-/* World picker: green = Tunnels, red = The Hat, chord = same as last time.
-   The buttons teach themselves. Exists only once the ritual has earned it. */
+/* World picker — the rack IS the picker (§11, §14.5). Two worlds keep the
+   original direct choice (green = the left peg, red = the right, chord = same
+   as last time — the buttons teach themselves). Three or more unlocked worlds
+   switch to the N-world picker: green steps left along the rack, red steps
+   right, the chord goes there. Locked pegs are skipped, never selectable, and
+   the stepping teaches the chord to anyone who forgot it. No new touch
+   targets either way. Exists only once the ritual has earned it.           */
 function showPicker(){
   G.phase = 'picker';
   G.pendingSide = null; G.pendingMs = 0;
-  // §11: the rack is the picker. Worlds Three & Four aren't built yet, so
-  // their pegs show as silhouettes filling at 10 / 15 days; the two built
-  // worlds stay on the green/red choice until the N-world picker (§14.5)
-  // and those worlds land.
-  const rack = rackVisible()? '<div class="rackHost"></div>' : '';
-  showPanel(
-    rack +
-    '<h1>Where today?</h1>'+
-    '<p class="vocab"><b class="g">Green</b> &mdash; Tunnels<br><b class="r">Red</b> &mdash; The Hat</p>'+
-    '<p class="hint">Both together &mdash; same as last time</p>'
-  );
+  // only worlds that are both unlocked AND actually implemented are selectable —
+  // Deep Water's peg can be unlocked (or shown in playtest) before its world
+  // exists, and must never be steppable to (WORLDS.deep is undefined until §13)
+  G.pickerWorlds = RACK_PEGS.filter(p=> isUnlocked(p.world) && WORLDS[p.world]).map(p=> p.world);
+  if(!G.pickerWorlds.length) G.pickerWorlds = ['tunnels'];
+  const last = LS.get('lastWorld', 'tunnels');
+  let i = G.pickerWorlds.indexOf(last); if(i<0) i = 0;
+  G.pickerIdx = i;
+  renderPicker();
+}
+
+function pegLabel(world){ const p = RACK_PEGS.find(x=> x.world===world); return p? p.label : world; }
+
+function renderPicker(){
+  const stepping = G.pickerWorlds.length > 2;
+  const sel = G.pickerWorlds[G.pickerIdx];
+  const rack = rackVisible()? '<div class="rackHost" data-select="'+sel+'"></div>' : '';
+  if(stepping){
+    showPanel(
+      rack +
+      '<h1>Where today?</h1>'+
+      '<p class="vocab">'+pegLabel(sel)+'</p>'+
+      '<p class="hint"><b class="g">Green</b> &larr; &middot; <b class="r">Red</b> &rarr; &middot; both to go there</p>'
+    );
+  }else{
+    const left = G.pickerWorlds[0], right = G.pickerWorlds[1] || G.pickerWorlds[0];
+    showPanel(
+      rack +
+      '<h1>Where today?</h1>'+
+      '<p class="vocab"><b class="g">Green</b> &mdash; '+pegLabel(left)+'<br><b class="r">Red</b> &mdash; '+pegLabel(right)+'</p>'+
+      '<p class="hint">Both together &mdash; same as last time</p>'
+    );
+  }
+}
+
+function stepPicker(dir){
+  const n = G.pickerWorlds.length;
+  G.pickerIdx = (G.pickerIdx + dir + n) % n;
+  AudioFX.ack();
+  renderPicker();
+}
+function confirmPicker(){
+  G.pendingSide = null;
+  chooseWorld(G.pickerWorlds[G.pickerIdx]);
 }
 
 function chooseWorld(worldId){
@@ -2856,9 +3513,11 @@ let leftHeld = false, rightHeld = false;
 function press(side){
   AudioFX.unlock();
   if(G.phase==='picker'){
-    // same chord grammar as everywhere else: singles pick, the chord repeats
-    if(G.pendingSide && G.pendingSide!==side){ chooseWorld(G.world); }
-    else if(!G.pendingSide){ G.pendingSide = side; G.pendingMs = 0; }
+    // singles step/choose, the chord commits — same chord grammar everywhere
+    if(G.pendingSide && G.pendingSide!==side){
+      if(G.pickerWorlds.length > 2) confirmPicker();          // stepping: chord = go there
+      else chooseWorld(LS.get('lastWorld', G.pickerWorlds[0])); // direct: chord = same as last
+    }else if(!G.pendingSide){ G.pendingSide = side; G.pendingMs = 0; }
     return;
   }
   if(G.phase!=='junction') return; // mid-corridor presses are silently ignored
@@ -2919,7 +3578,11 @@ window.addEventListener('keydown', e=>{
   else if(e.key==='ArrowRight'){ rightHeld = true; press('right'); bothPressCheck(); }
   else if(e.key==='Enter' || e.key===' ' || e.key==='ArrowDown'){
     if(G.phase==='junction'){ chooseStraight(true); return; }
-    if(G.phase==='picker'){ chooseWorld(G.world); return; }
+    if(G.phase==='picker'){
+      if(G.pickerWorlds.length > 2) confirmPicker();
+      else chooseWorld(LS.get('lastWorld', G.pickerWorlds[0]));
+      return;
+    }
     leftHeld = true; rightHeld = true; bothPressCheck();
     leftHeld = false; rightHeld = false; G.bothArmed = true;
   }
@@ -3039,7 +3702,10 @@ window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
   // §11 — the hat rack, days played, par & the golden night, playtest
   getDaysPlayed, worldUnlockDay, isUnlocked, rackVisible, updateProgression,
   stageParMs, newlyUnlocked, buildRackSVG, RACK_PEGS,
-  setPlaytest, get playtest(){ return playtest; } };
+  setPlaytest, get playtest(){ return playtest; },
+  // §12 — World Three: the forest, its cast, and the multi-leg pieces
+  FOREST_STAGES, forestStageFor, generateForestStage, placeForestCast,
+  effectiveForestParams, showPicker };
 </script>
 </body>
 </html>

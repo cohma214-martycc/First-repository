@@ -8,7 +8,7 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 - New **§6 v1.1** polish list from blindfolded-playtest review (press acknowledgement, per-button haptic signatures, wake-lock coverage, Do Not Disturb nudge).
 - New **v2 feature: the plan trace** — Navigator inks her intended route during the briefing; the reveal compares plan vs actual. This is the core map-reading teaching mechanic.
 - New **§7: World Two — The Hat**, a top-down overworld mode (homage to *We Found a Hat*), slotted into the roadmap as v2.5. Same two buttons, same colour grammar, new perspective.
-- New **§11 The Hat Rack (built)** — the invisible `hatUnlockRuns` gate is replaced by a visible, countable progression object driven by **days played** (see `WORLDS-THREE-AND-FOUR.md` §11, the authoritative spec). Adds the golden-night bonus and a sealed playtest mode. Pegs for Worlds Three & Four render as silhouettes until those worlds are built (§12–13).
+- New **§11 The Hat Rack (built)** — the invisible `hatUnlockRuns` gate is replaced by a visible, countable progression object driven by **days played** (see `WORLDS-THREE-AND-FOUR.md` §11, the authoritative spec). Adds the golden-night bonus and a sealed playtest mode. Peg for World Four renders as a silhouette until it is built (§13); **World Three — The Forest is now built** (§12, roadmap v2.7).
 - New CONFIG keys in §8 to support all of the above.
 
 ---
@@ -146,7 +146,15 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - **(built)** The golden night: a run that is bump-free across all three stages **and** finishes under a derived per-run par is worth two nights instead of one, capped at the first qualifying run each calendar day. **Par is never shown during a stage** and never as a number — only the golden outcome surfaces (gold line, rising two-note chime, distinct haptic, gold particles).
 - **(built)** The hat rack: four pegs, one hat per world; unlocked pegs in full colour, locked pegs as pale silhouettes; countable moon pips for sleeps remaining beneath the next locked peg; a gold-moon tease beside it. Rendered on the run-complete card and in the picker. First appears at 5 days (backfilling pegs 1 & 2); an unlock ceremony precedes the stats when a new peg is earned.
 - **(built)** Playtest mode (Marty only): three doors — URL `?unlockAll=1`, a dev-panel button ("Take all the hats down"), and the 4-3-2-1 rack gesture — unlock all worlds while sealing every write to the real save. A gold-moon tell in the rack corner and `PLAYTEST` in the debug overlay keep a test run unmistakable.
-- *pending* — Worlds Three (The Forest) & Four (Deep Water) themselves, and the N-world picker (`WORLDS-THREE-AND-FOUR.md` §12–14): their rack pegs already render as silhouettes and fill at 10 / 15 days.
+- *pending* — World Four (Deep Water) itself: its rack peg renders as a silhouette and fills at 15 days.
+
+### v2.7 — World Three: The Forest (built — see `WORLDS-THREE-AND-FOUR.md` §12 for the full spec)
+- **(built)** One maze walked twice: **leg 1** the bear searches down the spine, **leg 2** the run back up to the rabbit's arm. No new maze on the return — the same maze with start and exit swapped. Forest stages are **chord-only** (`chordShare:1` — the load-bearing constraint that keeps every call a plain green / red / both in both legs); a straight vertical spine with horizontal dead-end arms, generated from the shared daily seed with hand-authored chord-only fallbacks.
+- **(built)** The cast at the arm tips (rabbit, sleeper, deny/ask animals) and the deer at the foot of the spine. Meeting an animal is a **polite turnaround** — a bubble, a chime, a walk back to the junction, no bonk and **no bump counted**. Bare arms still bump. Bubbles are **pictograms** with a `forestSpeechMode:'words'` toggle (NO / OK). The rabbit's bubble is three slashed hats, protesting too much.
+- **(built)** The **deer beat** (two identical hat silhouettes, the bear's filled red) → the **full-bleed red page** ("He knows where his hat is.", the longest haptic, non-strobing, reduced-motion-safe) → leg 2, the bear facing up. On the run back the animals are gone; a wrong arm bumps and, after `forestHintAfterBumps`, the rabbit flickers back.
+- **(built)** The **two-weight reveal** (leg 1 soft grey, leg 2 charcoal ink, the rabbit redrawn hatless) and the deadpan run-complete scene: the bear sitting in his hat, a squirrel wandering in with a question nobody answers.
+- **(built)** The **N-world picker** (§14.5): with three or more worlds unlocked the rack becomes a stepper — **green steps left, red steps right, the chord goes there**; locked pegs are skipped. Two unlocked worlds keep the original direct green/red choice. No new touch targets either way.
+- *pending* — The plan trace on the return leg (`planTraceOnReturnLeg`): the CONFIG flag is in, but the finger-trace itself waits on the shared v2 plan-trace work, still pending across all worlds.
 
 ### v3 — Deepen the learning
 - Map mode and Memory mode stages (Navigator information scaling, §3) — in both worlds.
@@ -260,6 +268,16 @@ const CONFIG = {
   // playtest (Marty only) — URL ?unlockAll=1, dev panel, or the 4-3-2-1 rack gesture
   unlockAll: false,
   playtestSuppressesWrites: true,
+  // World Three — The Forest (§12, built)
+  forestWalkSpeed: 0.9,          // the bear's plod down the spine
+  forestReturnSpeedMult: 1.4,    // faster on the run back
+  forestRedPageMs: 1400,         // the full-bleed red beat
+  forestAnimalCount: 4,          // animals seated at arm tips
+  forestSpeechMode: 'pictures',  // 'pictures' | 'words' (NO / OK)
+  speakerLineMs: 1800,           // how long an animal's bubble holds
+  forestShowRabbitOnReturn: false, // keep the rabbit hidden on leg 2
+  forestHintAfterBumps: 3,       // wrong arms before the rabbit flickers back
+  planTraceOnReturnLeg: true,    // flag in; the finger-trace waits on v2 plan trace
   // debug
   debugOverlay: false,      // show grid, seed, junction ids
   seedOverride: null,       // force a specific daily seed for testing

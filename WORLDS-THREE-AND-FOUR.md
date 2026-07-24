@@ -94,6 +94,8 @@ A sealed mode that unlocks all four worlds immediately, for testing ahead of the
 
 ## §12 WORLD THREE — THE FOREST
 
+**Status: BUILT** (see `CLAUDE.md` roadmap v2.7 for the shipped summary; this section remains the authoritative design intent). Shipped faithful to the spec below with one deferral: the return-leg **plan trace** (`planTraceOnReturnLeg`) has its CONFIG flag but not the finger-trace, which waits on the shared v2 plan-trace work still pending across every world.
+
 Homage in spirit to *I Want My Hat Back*. All original assets.
 
 ### Why this world exists (design intent)
@@ -255,13 +257,13 @@ Sequenced for Claude Code. Nothing here changes the input model, the junction in
 2. **Par and the golden night** — per-run par from the optimal route, bump-free check, once-per-day cap, gold pip celebration. Par never surfaces during play.
 3. **The hat rack** — render, pip fill, first-appearance backfill at World Two, unlock ceremony. Shared by the run-complete card and the picker.
 4. **Playtest mode** — three doors, write suppression, the gold-moon tell.
-5. **N-world picker** — the two-way picker cannot express four worlds. **Green steps left along the rack, red steps right, chord goes there.** Locked pegs are skipped, not selectable. No new touch targets, no menus, and it teaches the chord to anyone who forgot it.
+5. **N-world picker** — **(built)** the two-way picker cannot express four worlds. **Green steps left along the rack, red steps right, chord goes there.** Locked pegs are skipped, not selectable. No new touch targets, no menus, and it teaches the chord to anyone who forgot it. (Two unlocked worlds keep the original direct green/red pick; the stepper engages at three or more.)
 
-**World Three**
-6. **Multi-leg stages** — a `legs` concept: leg 1 goal, cinematic beat, leg 2 start/heading/goal. Cheap, because leg 2 is the same maze with start and exit swapped.
-7. **Full-screen beat** — the red page, reduced-motion safe, non-strobing.
-8. **Bubble overlay and polite turnaround** — pictogram bubbles with a words toggle, and a bounce variant that skips the bonk and doesn't count a bump.
-9. **Two-weight reveal trace.**
+**World Three** — **(all built)**
+6. **Multi-leg stages** — **(built)** a leg concept: leg 1 goal, cinematic beat, leg 2 start/heading/goal. Cheap, because leg 2 is the same maze with start and exit swapped.
+7. **Full-screen beat** — **(built)** the red page, reduced-motion safe, non-strobing.
+8. **Bubble overlay and polite turnaround** — **(built)** pictogram bubbles with a words toggle, and a bounce variant that skips the bonk and doesn't count a bump.
+9. **Two-weight reveal trace.** — **(built)**
 
 **World Four**
 10. **Fog mask and seen-set** — per-stage lit-cell set, soft-edged mask, `mapLitPct` stat and its all-time best.
