@@ -205,6 +205,7 @@ const CONFIG_DEFAULTS = {
   worldUnlockDays: { tunnels:0, hat:5, forest:10, deep:15 },
   rackPipThreshold: 7,      // show countable sleeps when this few remain
   rackShowsFromWorldTwo: true, // no rack until the desert (5 days) is reached
+  pickerAlwaysAtBoot: true, // the picker opens every session, even with 1 hat unlocked
   rackEnabled: true,
   // the golden night (§11) — bump-free AND under par, once per calendar day
   goldenNightEnabled: true,
@@ -3845,9 +3846,21 @@ function pegLabel(world){ const p = RACK_PEGS.find(x=> x.world===world); return 
 
 function renderPicker(){
   const stepping = G.pickerWorlds.length > 2;
+  const single = G.pickerWorlds.length === 1;
   const sel = G.pickerWorlds[G.pickerIdx];
-  const rack = rackVisible()? '<div class="rackHost" data-select="'+sel+'"></div>' : '';
-  if(stepping){
+  // §11/§14.5: the picker's rack ignores the run-complete card's day-5 gate
+  // entirely — it always renders (subject only to the master rackEnabled
+  // switch) when pickerAlwaysAtBoot is on. One lit peg with silhouettes
+  // waiting is the whole suspense from the very first session.
+  const rackShown = CONFIG.rackEnabled && (CONFIG.pickerAlwaysAtBoot || rackVisible());
+  const rack = rackShown? '<div class="rackHost" data-select="'+sel+'"></div>' : '';
+  if(single){
+    showPanel(
+      rack +
+      '<h1>Ready?</h1>'+
+      '<p class="hint">Hold either button &mdash; or both &mdash; to dig in</p>'
+    );
+  }else if(stepping){
     showPanel(
       rack +
       '<h1>Where today?</h1>'+
@@ -4072,9 +4085,11 @@ G.runSeed = dailySeed();
 const lastWorld = LS.get('lastWorld', 'tunnels');
 G.world = WORLDS[lastWorld]? lastWorld : 'tunnels';
 setupStage(0);
-// §11: worlds unlock on DAYS PLAYED, not runs. The picker appears once The
-// Hat is earned (5 days) — or immediately in sealed playtest mode.
-if(playtest || getDaysPlayed() >= worldUnlockDay('hat')) showPicker();
+// §11: worlds unlock on DAYS PLAYED, not runs. Picker-at-boot: the picker
+// now opens every session regardless of unlock state — locked-world
+// silhouettes are the point from the very first play. The old day-5/
+// playtest gate remains as a fallback if pickerAlwaysAtBoot is ever off.
+if(CONFIG.pickerAlwaysAtBoot || playtest || getDaysPlayed() >= worldUnlockDay('hat')) showPicker();
 
 function frame(now){
   const dt = Math.min(100, now - lastT);
