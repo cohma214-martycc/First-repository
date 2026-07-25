@@ -227,6 +227,19 @@ const CONFIG_DEFAULTS = {
   forestShowRabbitOnReturn: false, // keep the rabbit hidden on leg 2 (she must remember)
   forestHintAfterBumps: 3,       // after this many wrong arms, the rabbit flickers back
   planTraceOnReturnLeg: true,    // the world the plan trace was invented for (trace pending)
+  // World Four — Deep Water (§13): a lantern in near-black water. The map draws
+  // itself as you explore; a briefing flash previews the whole ocean, then dark.
+  // A big fish follows (a longer-lag dog) — visible dread, never a fail state.
+  // The score is how much ocean you lit, never the hat (the ending is fixed).
+  swimSpeed: 0.85,                // tiles/sec — the little fish drifts, unhurried
+  deepFogRadiusTiles: 2.2,        // the lantern: how far the fish can see, open water
+  deepFogPlantsRadiusTiles: 1.2,  // the fog shrinks in the dense kelp at the goal
+  deepBriefingFlashMs: 4000,      // the whole ocean lit, then dark (§16.1 — dev-panel dial)
+  deepPursuerLagTiles: 3.5,       // the big fish's constant unhurried distance behind
+  deepShowPursuer: true,          // the dread is the Navigator's; the Driver never sees it
+  crabHintTiles: 4,               // the crab lights this many tiles down the correct branch
+  deepMapLitStat: true,           // "You saw N% of the ocean" — the survey, not the chase
+  deepEndingMs: 2000,             // the scripted stillness before the big fish emerges (§13)
   // feel & pacing (v1)
   bounceSpeedMult: 2.5,     // how fast the digger slides back after a bump
   junctionRecueMs: 5000,    // gentle "still waiting" cue for the eyes-closed Driver
@@ -926,6 +939,7 @@ function parseStage(stage){
     landmarks: stage.landmarks || null,  // World Two: nameable places
     decor: stage.decor || null,          // World Two: silent jokes
     forest: stage.forest || null,        // World Three: the cast + the rabbit's arm
+    crab: stage.crab || null,            // World Four: the sunning crab that points once
     // a world may enter from the surface (dig down) or the near edge (walk up)
     startHeading: (start && start.r === grid.length-1)? {dx:0,dy:-1} : {dx:0,dy:1},
     isOpen(c,r){
@@ -980,6 +994,14 @@ const G = {
   speaker: null,       // {cell, kind, t} — the current animal's bubble
   speakAfter: null,    // 'turnaround' | 'redpage'
   redPageT: 0,         // the full-bleed red beat timer
+  // World Four — Deep Water (§13): the lantern, the seen-set, the crab, the flash
+  lit: new Set(),      // open cells ever seen — the map the pair builds in their heads
+  flashT: 0,           // briefing-flash timer: the whole ocean lit, then dark
+  crab: null,          // {c,r,hintCells} — the sunning crab that points once
+  crabPointed: false,  // the crab points once per stage, then goes back to sunning
+  deepKelpMinRow: null,// rows at/below this are the dense kelp (fog shrinks there)
+  mapLitPct: 0,        // lit cells / open cells — the run's real achievement
+  deepEndingT: 0,      // the scripted stillness before the big fish emerges
   watcherAng: -Math.PI/2, // the Watcher tortoise's slow head
   particles: [],
   bothArmed: true,     // require full release between both-press triggers
@@ -995,6 +1017,7 @@ const canvas = document.getElementById('world');
 const ctx = canvas.getContext('2d');
 let W=0, H=0, DPR=1, cs=0, ox=0, oy=0, skyH=0, botH=0;
 let staticLayer = null;
+let fogLayer = null;   // World Four: the near-black water mask, erased along the swum path
 
 function layout(){
   if(!G.maze) return;
@@ -1047,6 +1070,14 @@ const WORLDS = {
       if(CONFIG.showDog) drawDog(s0.x - cs*0.85, oy - cs*0.24, 1, false, now);
     },
     drawAvatar: (x, y, now)=> drawDigger(x, y, now),
+    companionOn: ()=> CONFIG.showDog,
+    companionLag: ()=> CONFIG.dogLagTiles,
+    drawCompanion: (d, now)=>{
+      // the dog always knows: its ear pricks up near an uncollected gem
+      const earPrick = WORLD().hasGems && G.gems.some(g=> !g.collected &&
+        Math.max(Math.abs(g.c-G.cell.c), Math.abs(g.r-G.cell.r)) <= 2);
+      drawDog(d.x, d.y, G.dogFacing, d.moving, now, earPrick);
+    },
     rewardLine: 'Snack time!',
     reward: (now)=> drawSnackScene(now),                // chocolate milk + biscuits
   },
@@ -1105,6 +1136,40 @@ const WORLDS = {
     drawAvatar: (x, y, now)=> drawBear(x, y, now),
     rewardLine: 'He has his hat.',
     reward: (now)=> drawForestReward(now),
+  },
+
+  /* World Four — DEEP WATER. Elevation, open water. Near-black; a soft lantern
+     circle around the little fish and everywhere it has swum stays lit — the map
+     draws itself. A big fish follows at a constant distance (the dog, longer lag)
+     and is never a fail state. The score is how much ocean you lit, not the hat:
+     the ending is scripted and identical every time. Homage in spirit. */
+  deep: {
+    label: 'Deep Water',
+    companion: true,   // the big fish — the crumb-follow dog, reskinned, longer lag
+    hasGems: false,
+    bumpNoun: 'Tangles',
+    bumpDry: true,     // tangles: a wet muffled catch in the weed, not a thud
+    scriptedEnding: true, // the plants hold, then the big fish emerges wearing the hat
+    dugColour: '#16303C', // lit water — the trodden route reads a shade brighter
+    dust: '#2F5147', burst: ['#2F5147','#3F6A55'],
+    speed: ()=> speedWithNotch(CONFIG.swimSpeed),
+    stageFor: (idx)=> deepStageFor(idx),
+    topStrip: ()=> 0, bottomStrip: ()=> 0,               // open water to both edges
+    buildStatic: (s, rnd, m)=> buildStaticDeep(s, rnd, m),
+    drawExtras: (now)=> drawDeepExtras(now),
+    drawExitMarker: (now)=> drawDeepHat(now),            // faintly lit, seen only in fog range
+    drawTrail: ()=> drawDeepTrail(),
+    drawWaiting: (now)=>{
+      const s0 = cellCenter(G.maze.start.c, G.maze.start.r);
+      drawFish(s0.x, s0.y, now);
+    },
+    drawAvatar: (x, y, now)=> drawFish(x, y, now),
+    companionOn: ()=> CONFIG.deepShowPursuer,
+    companionLag: ()=> CONFIG.deepPursuerLagTiles,
+    drawCompanion: (d, now)=> drawPursuer(d.x, d.y, G.dogFacing, d.moving, now),
+    overlay: (now)=> drawDeepFog(now),                   // the fog mask, over everything
+    rewardLine: 'It was a good hat.',
+    reward: (now)=> drawDeepReward(now),                 // still water, the hatted big fish
   },
 };
 function WORLD(){ return WORLDS[G.world]; }
@@ -1358,6 +1423,57 @@ function forestStageFor(idx){
            forest: FOREST_FALLBACK_CAST[idx] };
 }
 
+/* ---------------- World Four data — DEEP WATER (§13) ----------------------
+   The ocean generates from the SAME daily seed as the tunnels, through its own
+   derived stream — a fresh sea each day, one ritual. Mixed junctions (unlike the
+   forest's chord-only spine); the standard generator already makes them, and the
+   hand-authored tunnel fixtures serve as the never-broken floor. The crab sits
+   beside one junction and points once down the correct branch; the dense kelp is
+   the last rows before the goal, where the lantern shrinks.                  */
+const DEEP_SEED_SALT = 0x44454550; // 'DEEP' — the ocean's own stream off the daily seed
+
+/* Seat the crab beside a junction on the route (not the first or last), and
+   precompute the tiles it will light down the correct branch — the route cells
+   just past that junction. Returns null when the maze has no interior junction
+   (then the stage simply has no crab; it is never required).                 */
+function placeDeepCrab(rowsArr, rnd){
+  const m = parseStage({name:'', rows: rowsArr});
+  const route = mazeRouteCells(m);
+  const deg = (c,r)=> [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx,dy])=>m.isOpen(c+dx,r+dy)).length;
+  // junctions on the route, comfortably inside it
+  const juncIdx = [];
+  for(let i=2;i<route.length-2;i++){ if(deg(route[i].c, route[i].r) >= 3) juncIdx.push(i); }
+  if(!juncIdx.length) return null;
+  const pick = juncIdx[Math.floor(rnd()*juncIdx.length)];
+  const j = route[pick];
+  // an open neighbour of the junction that is NOT on the route — the crab's rock
+  const nbrs = [[1,0],[-1,0],[0,1],[0,-1]].map(([dx,dy])=>({c:j.c+dx, r:j.r+dy}))
+    .filter(n=> m.isOpen(n.c,n.r) && !route.some(rc=> rc.c===n.c && rc.r===n.r));
+  const spot = nbrs.length? nbrs[Math.floor(rnd()*nbrs.length)] : {c:j.c, r:j.r};
+  // the correct branch = the route continuing past the junction
+  const hintCells = route.slice(pick+1, pick+1+CONFIG.crabHintTiles).map(c=> ({c:c.c, r:c.r}));
+  return { c:spot.c, r:spot.r, hintCells };
+}
+
+function generateDeepStage(idx, dailySeedVal, params){
+  for(let a=0;a<12;a++){
+    const rows = generateStageRows(idx, hash32(dailySeedVal ^ DEEP_SEED_SALT, a*5119), params);
+    if(!rows) continue;
+    const rnd = mulberry32(hash32(dailySeedVal, DEEP_SEED_SALT + idx*83 + a));
+    return { rows, crab: placeDeepCrab(rows, rnd) };
+  }
+  return null;
+}
+
+function deepStageFor(idx){
+  const gen = generateDeepStage(idx, G.runSeed, effectiveGenParams(idx));
+  if(gen) return { name:'Stage '+(idx+1), rows: gen.rows, generated:true, crab: gen.crab };
+  // the never-broken floor: the shipped tunnel fixtures read fine as ocean corridors
+  const fb = FALLBACK_STAGES[idx];
+  const rnd = mulberry32(hash32(G.runSeed, DEEP_SEED_SALT + idx*97));
+  return { name: fb.name, rows: fb.rows, generated:false, crab: placeDeepCrab(fb.rows, rnd) };
+}
+
 /* ---------------- Static layer dispatch ---------------------------------- */
 function buildStaticLayer(){
   const m = G.maze;
@@ -1556,6 +1672,12 @@ function setupStage(idx){
   G.leg2Bumps = 0;
   G.hintRabbit = false;
   G.speaker = null; G.speakAfter = null;
+  // World Four (§13): the seen-set, the briefing flash, the crab — reset per stage
+  G.lit = new Set([key(G.cell)]);
+  G.crab = G.maze.crab; G.crabPointed = false;
+  G.mapLitPct = 0;
+  G.deepKelpMinRow = (G.world==='deep') ? Math.max(1, G.maze.exit.r - 2) : null;
+  G.flashT = (G.world==='deep') ? CONFIG.deepBriefingFlashMs : 0;
   G.helmetSlip = false;
   G.facing = 1;
   G.crumbs = []; G.dogPrev = null; G.dogFacing = 1;
@@ -1624,7 +1746,18 @@ function arriveAt(cell){
    arm at the top of leg 2 (→ the real breakthrough). */
 function reachGoal(){
   if(WORLD().multiLeg && G.leg===1){ startDeerBeat(); }
+  else if(WORLD().scriptedEnding){ startDeepEnding(); }
   else breakthrough();
+}
+
+/* §13: the ending that cannot be avoided. Both fish are inside the plants; the
+   camera holds in stillness (long enough to be uncomfortable, which is the
+   joke), then the normal breakthrough follows. The big fish emerges wearing the
+   hat in the run-complete scene — the hat was never the little fish's to keep. */
+function startDeepEnding(){
+  G.phase = 'deepEnding';
+  G.deepEndingT = CONFIG.deepEndingMs;
+  AudioFX.chime();
 }
 
 /* ---------------- World Three: the two legs & the red page (§12) ---------- */
@@ -1791,10 +1924,18 @@ function showReveal(){
   G.stagePars.push(stageParMs(G.maze, G.digSpeed) + (G.legParExtra || 0));
   const gemLine = (WORLD().hasGems && G.gems.length)
     ? '<p class="vocab">Found '+G.gemsThisStage+' of '+G.gems.length+' gems &#9670;</p>' : '';
+  // §13: Deep Water's achievement is the survey — how much ocean you lit.
+  let litLine = '';
+  if(G.world==='deep' && CONFIG.deepMapLitStat){
+    G.mapLitPct = deepLitPct();
+    const bestLit = LS.get('deepBestLit', 0);
+    if(G.mapLitPct > bestLit && shouldPersist()) LS.set('deepBestLit', G.mapLitPct);
+    litLine = '<p class="vocab">You saw '+G.mapLitPct+'% of the ocean</p>';
+  }
   showPanel(
     '<h1>You made it!</h1>'+
     '<p>Time '+fmtTime(G.stageMs)+' &middot; '+WORLD().bumpNoun+' '+G.bumps.length+' &#9733;</p>'+
-    gemLine+
+    gemLine+ litLine+
     (G.stageIdx<2
       ? '<p class="hint">Hold both buttons together for the next stage</p>'
       : '<p class="hint">Hold both buttons together to finish the run</p>')
@@ -1913,12 +2054,16 @@ function renderRunThumbnail(){
   cv.width = m.cols*cell + pad*2;
   cv.height = m.rowsN*cell + pad*2;
   const t = cv.getContext('2d');
-  const hat = (G.world==='hat'), forest = (G.world==='forest');
-  t.fillStyle = forest? FPAL.bark : hat? HPAL.sand : PAL.soilDeep;
+  const hat = (G.world==='hat'), forest = (G.world==='forest'), deep = (G.world==='deep');
+  t.fillStyle = deep? DPAL.water : forest? FPAL.bark : hat? HPAL.sand : PAL.soilDeep;
   t.fillRect(0,0,cv.width,cv.height);
-  t.fillStyle = forest? FPAL.floor : hat? HPAL.path : PAL.tunnel;
+  // Deep Water keeps only what was lit — the unseen dark stays, so the keepsake
+  // is a different shape every day (§13). Other worlds draw the whole map.
+  t.fillStyle = deep? DPAL.waterLit : forest? FPAL.floor : hat? HPAL.path : PAL.tunnel;
   for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
-    if(m.isOpen(c,r)) t.fillRect(pad+c*cell, pad+r*cell, cell, cell);
+    if(!m.isOpen(c,r)) continue;
+    if(deep && !G.lit.has(c+','+r)) continue;
+    t.fillRect(pad+c*cell, pad+r*cell, cell, cell);
   }
   const cx = (c)=> pad + c*cell + cell/2, cy = (r)=> pad + r*cell + cell/2;
   const inkTrace = (trace, style, w)=>{
@@ -1931,6 +2076,10 @@ function renderRunThumbnail(){
   if(forest){ // both legs — leg 1 soft grey, leg 2 charcoal (a different shape each day)
     inkTrace(G.traceLeg1, 'rgba(233,231,214,0.5)', Math.max(1.5, cell*0.24));
     inkTrace(G.trace,     FPAL.charcoal,           Math.max(1.5, cell*0.32));
+  }else if(deep){ // a dotted bubble-trail through the lit water
+    t.setLineDash([cell*0.35, cell*0.4]);
+    inkTrace(G.trace, 'rgba(232,224,206,0.9)', Math.max(1.5, cell*0.28));
+    t.setLineDash([]);
   }else if(G.trace.length > 1){ // the wobbly route, inked (dashed = footprints)
     if(hat) t.setLineDash([cell*0.5, cell*0.4]);
     inkTrace(G.trace, PAL.gem, Math.max(1.5, cell*0.32));
@@ -2057,6 +2206,13 @@ function update(dt){
   // stage clock runs only while actually underground
   if(PLAY_PHASES.has(G.phase)) G.stageMs += dt;
 
+  // §13: the briefing flash — the whole ocean lit, then it fades to dark. Untimed
+  // planning stays untimed; the flash just runs out and the fog closes in.
+  if(G.world==='deep' && G.phase==='briefing' && G.flashT>0) G.flashT -= dt;
+  // the lantern lights every open cell it passes over, permanently — the seen-set
+  // the pair carry in their heads. Marked while actually swimming.
+  if(G.world==='deep' && PLAY_PHASES.has(G.phase)) markLit();
+
   if(G.phase==='countdown'){
     G.countdownT -= dt;
     if(G.countdownT<=0){
@@ -2110,6 +2266,10 @@ function update(dt){
   else if(G.phase==='redpage'){        // §12: the full-bleed red beat, then leg 2
     G.redPageT -= dt;
     if(G.redPageT<=0) beginLeg2();
+  }
+  else if(G.phase==='deepEnding'){     // §13: the plants hold, then the breakthrough
+    G.deepEndingT -= dt;
+    if(G.deepEndingT<=0) breakthrough();
   }
   else if(G.phase==='runComplete'){
     G.snackT += dt;
@@ -2175,12 +2335,9 @@ function render(now){
     }else{
       const p = diggerXY();
       WORLD().drawAvatar(p.x, p.y, now);
-      if(WORLD().companion && CONFIG.showDog){
+      if(WORLD().companion && (WORLD().companionOn? WORLD().companionOn() : CONFIG.showDog)){
         const d = dogXY();
-        // the dog always knows: its ear pricks up near an uncollected gem
-        const earPrick = WORLD().hasGems && G.gems.some(g=> !g.collected &&
-          Math.max(Math.abs(g.c-G.cell.c), Math.abs(g.r-G.cell.r)) <= 2);
-        drawDog(d.x, d.y, G.dogFacing, d.moving, now, earPrick);
+        WORLD().drawCompanion(d, now);
       }
     }
   }
@@ -2193,6 +2350,7 @@ function render(now){
   });
   ctx.globalAlpha = 1;
 
+  if(WORLD().overlay) WORLD().overlay(now);       // §13: Deep Water's fog mask
   if(G.phase==='runComplete') WORLD().reward(now);
   if(G.phase==='redpage') drawForestRedPage(now); // §12: covers everything
 
@@ -2437,7 +2595,7 @@ function drawSnackScene(now){
 /* The dog trots a fixed distance behind the digger along its exact trail —
    so it turns around and backs up after a bump, which is most of the joke. */
 function dogXY(){
-  const lag = CONFIG.dogLagTiles * cs;
+  const lag = (WORLD().companionLag? WORLD().companionLag() : CONFIG.dogLagTiles) * cs;
   const cr = G.crumbs;
   let pos = null;
   if(cr.length >= 2){
@@ -3248,6 +3406,243 @@ function drawForestReward(now){
 }
 /* ================= end World Three drawing =============================== */
 
+/* ---------------- World Four drawing — DEEP WATER (§13) -------------------
+   Near-black water. A soft lantern circle around the little fish, and every
+   cell it has swum through stays lit permanently — the map draws itself, which
+   is the whole feature. The big fish follows and is never a fail state. The
+   ending is scripted; the score is how much ocean was lit. Homage in spirit,
+   all original assets — our fish are our own fish.                          */
+const DPAL = {
+  water:'#0E1A24', waterLit:'#16303C', kelp:'#2F5147', kelpLight:'#3F6A55',
+  fish:'#E8E0CE', ink:'#33291F', hatBlue:'#3E6E9C', hatBrim:'#2E5578', crab:'#B4653A',
+};
+let fogCtx = null;
+
+/* The fog is a soft-edged mask over the static ocean, not darkened tiles. It
+   lives on its own layer that is erased along the swum path — no hard vignette
+   ring, and the lit corridor is permanent because the erase is permanent.   */
+function rebuildFogLayer(){
+  fogLayer = document.createElement('canvas');
+  fogLayer.width = canvas.width; fogLayer.height = canvas.height;
+  fogCtx = fogLayer.getContext('2d');
+  fogCtx.setTransform(DPR,0,0,DPR,0,0);
+  fogCtx.fillStyle = DPAL.water; fogCtx.fillRect(0,0,W,H);
+  // re-light every cell already seen, so a mid-stage relayout keeps the map
+  if(G.lit) G.lit.forEach(k=>{ const [c,r]=k.split(',').map(Number); eraseFogCell(c,r); });
+}
+function eraseFog(x,y,r){
+  if(!fogCtx || r<=0) return;
+  fogCtx.globalCompositeOperation = 'destination-out';
+  const g = fogCtx.createRadialGradient(x,y,r*0.35, x,y,r);
+  g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(0.7,'rgba(0,0,0,0.85)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  fogCtx.fillStyle = g; fogCtx.beginPath(); fogCtx.arc(x,y,r,0,Math.PI*2); fogCtx.fill();
+  fogCtx.globalCompositeOperation = 'source-over';
+}
+function eraseFogCell(c,r){ const p = cellCenter(c,r); eraseFog(p.x, p.y, cs*1.05); }
+
+function deepInKelp(){ return G.deepKelpMinRow!=null && G.cell && G.cell.r >= G.deepKelpMinRow; }
+function deepFogRadiusPx(){
+  return (deepInKelp()? CONFIG.deepFogPlantsRadiusTiles : CONFIG.deepFogRadiusTiles) * cs;
+}
+
+/* The seen-set: mark every open cell within the lantern permanently lit, and
+   let the crab point once — swim within a tile and the correct branch lights
+   for crabHintTiles cells, then it goes back to sunning. Not required, easy
+   to miss; Deep Water spends its silent-joke slot here on purpose.          */
+function markLit(){
+  const m = G.maze;
+  const R = deepInKelp()? CONFIG.deepFogPlantsRadiusTiles : CONFIG.deepFogRadiusTiles;
+  const rad = Math.ceil(R);
+  for(let dr=-rad; dr<=rad; dr++) for(let dc=-rad; dc<=rad; dc++){
+    if(Math.hypot(dc,dr) > R) continue;
+    const c = G.cell.c+dc, r = G.cell.r+dr;
+    if(m.isOpen(c,r)) G.lit.add(c+','+r);
+  }
+  if(G.crab && !G.crabPointed &&
+     Math.max(Math.abs(G.crab.c-G.cell.c), Math.abs(G.crab.r-G.cell.r)) <= 1){
+    G.crabPointed = true;
+    AudioFX.gem(); // one small bright "there" — the crab's whole contribution
+    G.crab.hintCells.forEach(hc=>{ G.lit.add(hc.c+','+hc.r); eraseFogCell(hc.c, hc.r); });
+  }
+}
+
+/* Composited over everything each frame: the lantern follows the fish (a
+   permanent erase) except at the reveal, where the map freezes and the never-
+   seen dark stays — the shape of what was missed, the reason to come back.  */
+function drawDeepFog(now){
+  if(!fogLayer) return;
+  if(G.phase==='runComplete' || G.phase==='picker') return;
+  if(G.flashT > 0) return;                 // the briefing flash: the whole ocean, lit
+  if(G.phase!=='reveal'){ const p = diggerXY(); eraseFog(p.x, p.y, deepFogRadiusPx()); }
+  ctx.drawImage(fogLayer, 0, 0, W, H);
+}
+
+function buildStaticDeep(s, rnd, m){
+  G.treasure = [];                          // no buried fortunes here
+  s.fillStyle = DPAL.water; s.fillRect(0,0,W,H);
+  // open corridors a shade lighter — the map the lantern reveals
+  s.fillStyle = DPAL.waterLit;
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+    if(m.isOpen(c,r)) s.fillRect(ox+c*cs+1, oy+r*cs+1, cs-2, cs-2);
+  }
+  // a faint suspended grain — motes in the water
+  s.globalAlpha = 0.05;
+  for(let i=0;i<W*H/200;i++){ s.fillStyle = rnd()<0.5? '#000':'#7FA0AE'; s.fillRect(rnd()*W, rnd()*H, 1, 1); }
+  s.globalAlpha = 1;
+  rebuildFogLayer();
+}
+
+/* A small blue bowler — the hat that is not the little fish's. Brim ellipse and
+   a rounded dome; the one accent blue in the world, readable against near-black.
+   Symmetric, so it reads in profile (on the fish) and head-on (the reward).  */
+function deepBowler(g, cx, by, s){
+  g.fillStyle = DPAL.hatBrim;
+  g.beginPath(); g.ellipse(cx, by, s*0.62, s*0.16, 0, 0, Math.PI*2); g.fill();
+  g.fillStyle = DPAL.hatBlue;
+  g.beginPath(); g.arc(cx, by, s*0.42, Math.PI, 0); g.closePath(); g.fill();
+  g.beginPath(); g.ellipse(cx, by, s*0.42, s*0.09, 0, 0, Math.PI, true); g.fill();
+}
+
+/* The little fish: pale ivory, a single dot eye, a slow tail sine — and the
+   stolen blue hat it is quite sure it will get away with. */
+function drawFish(x, y, now){
+  const s = cs*0.42;
+  const tail = reducedMotion? 0 : Math.sin(now/240)*s*0.18;
+  ctx.save(); ctx.translate(x, y); ctx.scale(G.facing, 1);
+  ctx.fillStyle = DPAL.fish;
+  ctx.beginPath(); ctx.ellipse(0, 0, s*0.52, s*0.30, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-s*0.44, 0); ctx.lineTo(-s*0.74, -s*0.24+tail); ctx.lineTo(-s*0.74, s*0.24+tail); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = DPAL.ink; ctx.beginPath(); ctx.arc(s*0.28, -s*0.05, s*0.05, 0, Math.PI*2); ctx.fill();
+  deepBowler(ctx, s*0.06, -s*0.26, s*0.34);
+  ctx.restore();
+}
+
+/* The big fish: larger, hatless, a deadpan mouth line. Mechanically the dog —
+   it follows the little fish's exact trail at a longer lag, backs up when the
+   little fish bounces, and can never collide. The dread is all the Navigator's. */
+function drawPursuer(x, y, facing, moving, now){
+  const s = cs*0.74;
+  const tail = reducedMotion? 0 : Math.sin(now/320)*s*0.14;
+  ctx.save(); ctx.translate(x, y); ctx.scale(facing, 1);
+  ctx.fillStyle = DPAL.fish;
+  ctx.beginPath(); ctx.ellipse(0, 0, s*0.56, s*0.34, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-s*0.48, 0); ctx.lineTo(-s*0.84, -s*0.28+tail); ctx.lineTo(-s*0.84, s*0.28+tail); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = DPAL.ink; ctx.beginPath(); ctx.arc(s*0.30, -s*0.06, s*0.055, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = DPAL.ink; ctx.lineWidth = Math.max(1, s*0.035); ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(s*0.40, s*0.08); ctx.lineTo(s*0.52, s*0.06); ctx.stroke();
+  ctx.restore();
+}
+
+function drawKelpFrond(cx, baseY, h, phase, colour){
+  const sway = reducedMotion? 0 : Math.sin(phase)*h*0.12;
+  ctx.strokeStyle = colour; ctx.lineWidth = Math.max(2, cs*0.12); ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(cx, baseY);
+  ctx.quadraticCurveTo(cx+sway*0.5, baseY-h*0.5, cx+sway, baseY-h);
+  ctx.stroke();
+}
+
+function drawCrab(c, r, now){
+  const p = cellCenter(c, r), s = cs*0.30;
+  ctx.save(); ctx.translate(p.x, p.y + cs*0.16);
+  ctx.fillStyle = DPAL.crab;
+  ctx.beginPath(); ctx.ellipse(0, 0, s*0.62, s*0.42, 0, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = DPAL.crab; ctx.lineWidth = Math.max(1, s*0.16); ctx.lineCap='round';
+  for(const sgn of [-1, 1]){
+    ctx.beginPath(); ctx.moveTo(sgn*s*0.5, s*0.05); ctx.lineTo(sgn*s*0.9, -s*0.14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sgn*s*0.4, s*0.2); ctx.lineTo(sgn*s*0.66, s*0.34); ctx.stroke();
+  }
+  ctx.fillStyle = DPAL.ink;
+  ctx.beginPath(); ctx.arc(-s*0.2, -s*0.34, s*0.06, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc( s*0.2, -s*0.34, s*0.06, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawDeepBubbles(now){
+  if(reducedMotion) return;
+  ctx.fillStyle = 'rgba(232,224,206,0.20)';
+  for(let i=0;i<14;i++){
+    const bx = (Math.sin(i*97.3)*0.5 + 0.5) * W;
+    const speed = 26 + (i%5)*9;
+    const by = H - ((now/1000*speed + i*47) % (H+40));
+    ctx.beginPath(); ctx.arc(bx, by, 1.5 + (i%3), 0, Math.PI*2); ctx.fill();
+  }
+}
+
+function drawDeepExtras(now){
+  const m = G.maze;
+  // dense kelp in the last rows before the goal — where the lantern shrinks
+  if(G.deepKelpMinRow!=null){
+    for(let r=G.deepKelpMinRow;r<m.rowsN;r++) for(let c=0;c<m.cols;c++){
+      if(!m.isOpen(c,r)) continue;
+      const base = oy + r*cs + cs*0.92, ph = now/900 + c*0.7 + r*0.3;
+      drawKelpFrond(ox+c*cs+cs*0.35, base, cs*0.95, ph,     DPAL.kelp);
+      drawKelpFrond(ox+c*cs+cs*0.65, base, cs*0.72, ph+1.3, DPAL.kelpLight);
+    }
+  }
+  if(G.crab) drawCrab(G.crab.c, G.crab.r, now);   // sunning; fog hides it until near
+  drawDeepBubbles(now);
+}
+
+/* The goal: the blue hat, faintly lit, seen only within lantern range (the fog
+   composited afterward does the hiding). The little fish never sees it until
+   it's too late — but here it never sees it at all; the big fish takes it. */
+function drawDeepHat(now){
+  if(G.phase==='runComplete') return;
+  const e = cellCenter(G.maze.exit.c, G.maze.exit.r);
+  deepBowler(ctx, e.x, e.y + cs*0.06, cs*0.5);
+}
+
+/* The reveal: the route as a dotted bubble-trail, bump stars, and — because the
+   fog is composited over this too — the unexplored dark left exactly as it was. */
+function drawDeepTrail(){
+  if(G.trace.length > 1){
+    ctx.fillStyle = 'rgba(232,224,206,0.8)';
+    G.trace.forEach((cell,i)=>{
+      if(i % 2) return;
+      const p = cellCenter(cell.c, cell.r);
+      ctx.beginPath(); ctx.arc(p.x + wob(i), p.y + wob(i+311), Math.max(1.5, cs*0.09), 0, Math.PI*2); ctx.fill();
+    });
+  }
+  drawBumpStars();
+}
+
+/* Run complete: still water, the plants, the big fish — hatted, motionless,
+   facing the reader. One bubble rises and the scene holds. World Four signs off
+   with silence: no fanfare, only a low chime already played on arrival.      */
+function drawDeepReward(now){
+  ctx.fillStyle = DPAL.water; ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha = 0.5;
+  for(let i=0;i<7;i++){ drawKelpFrond((i+0.5)/7*W, H*0.99, H*0.22, now/1100 + i, DPAL.kelp); }
+  ctx.globalAlpha = 1;
+  const cx = W*0.5, cy = H*0.48, s = Math.min(70, W*0.2);
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.fillStyle = DPAL.fish;
+  ctx.beginPath(); ctx.ellipse(0, 0, s*0.92, s*0.62, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(s*0.86, -s*0.08); ctx.lineTo(s*1.18, -s*0.34); ctx.lineTo(s*1.06, s*0.10); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = DPAL.ink;
+  ctx.beginPath(); ctx.arc(-s*0.28, -s*0.12, s*0.07, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc( s*0.28, -s*0.12, s*0.07, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = DPAL.ink; ctx.lineWidth = Math.max(1, s*0.04); ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-s*0.16, s*0.22); ctx.lineTo(s*0.16, s*0.22); ctx.stroke();
+  deepBowler(ctx, 0, -s*0.48, s*0.98);
+  ctx.restore();
+  if(!reducedMotion){
+    ctx.fillStyle = 'rgba(232,224,206,0.3)';
+    const by = H - ((now/1000*40) % (H*0.6)) - H*0.12;
+    ctx.beginPath(); ctx.arc(cx + s*0.95, by, 3, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+/* The survey, not the chase: lit open cells over all open cells. Shown after
+   the stage, tracked as an all-time best. This reframes the world and rewards
+   exactly the skill being taught — protect this idea (§13).                 */
+function deepLitPct(){
+  const m = G.maze; let open = 0;
+  for(let r=0;r<m.rowsN;r++) for(let c=0;c<m.cols;c++) if(m.isOpen(c,r)) open++;
+  return open? Math.round(100 * G.lit.size / open) : 0;
+}
+/* ================= end World Four drawing =============================== */
+
 function drawDebug(){
   const m = G.maze;
   ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -3705,7 +4100,9 @@ window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
   setPlaytest, get playtest(){ return playtest; },
   // §12 — World Three: the forest, its cast, and the multi-leg pieces
   FOREST_STAGES, forestStageFor, generateForestStage, placeForestCast,
-  effectiveForestParams, showPicker };
+  effectiveForestParams, showPicker,
+  // §13 — World Four: Deep Water, its ocean generation, and the fog/seen-set
+  deepStageFor, generateDeepStage, placeDeepCrab, markLit, deepLitPct };
 </script>
 </body>
 </html>
