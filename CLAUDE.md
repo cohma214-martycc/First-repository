@@ -8,8 +8,9 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 - New **§6 v1.1** polish list from blindfolded-playtest review (press acknowledgement, per-button haptic signatures, wake-lock coverage, Do Not Disturb nudge).
 - **The plan trace is cut.** Earlier revisions planned a v2 briefing finger-trace (the Navigator inking her intended route, compared against the actual path at the reveal). It was never built and has now been dropped from the game — the two buttons stay the *only* touch targets, in every phase, of every world. Its CONFIG flags and roadmap items are removed accordingly.
 - New **§7: World Two — The Hat**, a top-down overworld mode (homage to *We Found a Hat*), slotted into the roadmap as v2.5. Same two buttons, same colour grammar, new perspective.
-- New **§11 The Hat Rack (built)** — the invisible `hatUnlockRuns` gate is replaced by a visible, countable progression object driven by **days played** (see `WORLDS-THREE-AND-FOUR.md` §11, the authoritative spec). Adds the golden-night bonus and a sealed playtest mode. **World Three — The Forest is built** (§12, roadmap v2.7) and **World Four — Deep Water is now built** (§13, roadmap v2.8) — the fourth peg fills from a silhouette to a blue bowler at 15 days played.
+- New **§11 The Hat Rack (built)** — the invisible `hatUnlockRuns` gate is replaced by a visible, countable progression object driven by **days played** (see §11). Adds the golden-night bonus and a sealed playtest mode. **World Three — The Forest is built** (§12, roadmap v2.7) and **World Four — Deep Water is now built** (§13, roadmap v2.8) — the fourth peg fills from a silhouette to a blue bowler at 15 days played.
 - New CONFIG keys in §8 to support all of the above.
+- **This file is now the single source of truth.** The former `WORLDS-THREE-AND-FOUR.md` (worlds 3 & 4, the rack, engine work, tuning) and `BUILD_PLAN.md` (the shipped v2→v2.5 build order) have been folded in and deleted — §11–§16 hold the worlds/rack detail, and a closing roadmap section lists everything still unbuilt.
 
 ---
 
@@ -141,14 +142,14 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - **(built)** H2: procedural desert generation on the shared daily seed; landmark-aware generation (every junction within one tile of a distinct nameable landmark; the nameable vocabulary grew to seven so big stages stay unambiguous); journal entries with footprint thumbnails.
 - **Do not start v2.5 until the tunnel ritual has demonstrably stuck** (streaks happening without prompting) — this gate was met before the Hat was built.
 
-### v2.6 — The Hat Rack (built — see `WORLDS-THREE-AND-FOUR.md` §11 for the full spec)
+### v2.6 — The Hat Rack (built — see §11 for the full spec)
 - **(built)** Progression currency: `tunnels:daysPlayed` — distinct calendar days a run was completed, cumulative, monotonic, shared across worlds, migrated from the journal's `day` stamps. Worlds now unlock on **days played** (Tunnels 0, The Hat 5, The Forest 10, Deep Water 15), replacing the invisible `hatUnlockRuns` gate.
 - **(built)** The golden night: a run that is bump-free across all three stages **and** finishes under a derived per-run par is worth two nights instead of one, capped at the first qualifying run each calendar day. **Par is never shown during a stage** and never as a number — only the golden outcome surfaces (gold line, rising two-note chime, distinct haptic, gold particles).
 - **(built)** The hat rack: four pegs, one hat per world; unlocked pegs in full colour, locked pegs as pale silhouettes; countable moon pips for sleeps remaining beneath the next locked peg; a gold-moon tease beside it. Rendered on the run-complete card and in the picker. First appears at 5 days (backfilling pegs 1 & 2); an unlock ceremony precedes the stats when a new peg is earned.
 - **(built)** Playtest mode (Marty only): three doors — URL `?unlockAll=1`, a dev-panel button ("Take all the hats down"), and the 4-3-2-1 rack gesture — unlock all worlds while sealing every write to the real save. A gold-moon tell in the rack corner and `PLAYTEST` in the debug overlay keep a test run unmistakable.
 - **(built)** World Four (Deep Water) itself — see v2.8 below; its rack peg fills from a silhouette to a blue bowler at 15 days.
 
-### v2.7 — World Three: The Forest (built — see `WORLDS-THREE-AND-FOUR.md` §12 for the full spec)
+### v2.7 — World Three: The Forest (built — see §12 for the full spec)
 - **(built)** One maze walked twice: **leg 1** the bear searches down the spine, **leg 2** the run back up to the rabbit's arm. No new maze on the return — the same maze with start and exit swapped. Forest stages are **chord-only** (`chordShare:1` — the load-bearing constraint that keeps every call a plain green / red / both in both legs); a straight vertical spine with horizontal dead-end arms, generated from the shared daily seed with hand-authored chord-only fallbacks.
 - **(built)** The cast at the arm tips (rabbit, sleeper, deny/ask animals) and the deer at the foot of the spine. Meeting an animal is a **polite turnaround** — a bubble, a chime, a walk back to the junction, no bonk and **no bump counted**. Bare arms still bump. Bubbles are **pictograms** with a `forestSpeechMode:'words'` toggle (NO / OK). The rabbit's bubble is three slashed hats, protesting too much.
 - **(built)** The **deer beat** (two identical hat silhouettes, the bear's filled red) → the **full-bleed red page** ("He knows where his hat is.", the longest haptic, non-strobing, reduced-motion-safe) → leg 2, the bear facing up. On the run back the animals are gone; a wrong arm bumps and, after `forestHintAfterBumps`, the rabbit flickers back.
@@ -156,7 +157,7 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - **(built)** The **N-world picker** (§14.5): with three or more worlds unlocked the rack becomes a stepper — **green steps left, red steps right, the chord goes there**; locked pegs are skipped. Two unlocked worlds keep the original direct green/red choice. No new touch targets either way.
 - *cut* — The plan trace on the return leg: dropped along with the plan trace everywhere (the finger-trace was never built).
 
-### v2.8 — World Four: Deep Water (built — see `WORLDS-THREE-AND-FOUR.md` §13 for the full spec)
+### v2.8 — World Four: Deep Water (built — see §13 for the full spec)
 - **(built)** The lantern and the seen-set — the ladder's seventh rung, **building a map from partial views**. Near-black water; the Navigator sees a soft circle of `deepFogRadiusTiles` around the little fish, and **everywhere it has swum stays lit permanently**, so the map draws itself. Rendered as a soft-edged fog mask over the static ocean (no hard vignette), erased along the swum path; a mid-stage relayout re-lights the known cells from the seen-set.
 - **(built)** The **briefing flash** (`deepBriefingFlashMs`, default 4000, a dev-panel dial per §16.1): the whole ocean lit while the pair plan, then it fades to dark. The briefing stays untimed. In the dense **kelp** at the goal the fog shrinks to `deepFogPlantsRadiusTiles`.
 - **(built)** The **big fish** — mechanically the crumb-follow dog, reskinned, at `deepPursuerLagTiles` behind; it backs up in unison when the little fish bounces, can never collide, and is **never a fail state**. Visible to the Navigator, invisible to the Driver — the correct distribution of dread. The **crab** (Deep Water's silent-joke slot) points once, lighting `crabHintTiles` down the correct branch, then goes back to sunning.
@@ -315,3 +316,122 @@ Rule: **no magic numbers in gameplay code** — if it affects feel, it goes in C
 ## 10. Tone Rules (for every string and sound in the game)
 
 Bumps and bonks are funny. Nothing is ever a failure. The game never says "wrong", "oops" in a scolding way, or shows a red X. Stats celebrate ("smoothest run yet!") and never shame. The Driver being helpless is the joke; the Navigator being capable is the point. The tortoises never speak. The hat is never explained.
+
+---
+
+# Worlds Three & Four, the rack, and what's next (§11–§16)
+
+*Folded in from the former `WORLDS-THREE-AND-FOUR.md` (now deleted) so this file is the single source of truth. Everything in §11–§14 is **built and shipped**; §16 is playtest tuning, not code to write.*
+
+**Homage rule, non-negotiable:** all original assets, all original strings. No reproduction of Klassen's illustrations, characters, compositions, trade dress, or text. The debt we honour is the deadpan, the withheld information, and the flat colour. In-game names are ours: *The Forest*, *Deep Water* — never the book titles.
+
+**Decisions locked:** thresholds 5 / 10 / 15 days · one currency (days played) · golden-night bonus = no bumps **and** under par, once per calendar day · rack appears only on reaching World Two · Forest speech is pictures with a words toggle · Forest trace charcoal · Forest built first · deadpan endings kept as the books leave them · **the plan trace is cut** (never built, dropped everywhere; the two buttons are the only touch targets in every phase).
+
+## 11. The Hat Rack — progression made visible (**built**)
+
+**Principle:** progress **never goes backwards**. Nothing earned is ever taken away, and the counter never mentions a day that wasn't played.
+
+**The currency — days played:** distinct calendar days on which a run was completed, in any world. Cumulative, monotonic, shared across all four worlds — one ritual, one number. Stored as `tunnels:daysPlayed`, migrated from the journal's `day` stamps (`new Set(journal.map(e=>e.day)).size`). Streaks keep their own separate job (difficulty notches, the "Day 7 of digging together" line) and are celebrated, not spent.
+
+**The unlock ladder:**
+
+| Peg | World | Hat | Unlocks at |
+|---|---|---|---|
+| 1 | Tunnels | yellow hard hat | from the start |
+| 2 | The Hat | tan cowboy hat | **5 days** |
+| 3 | The Forest | red pointy hat | **10 days** |
+| 4 | Deep Water | small blue bowler | **15 days** |
+
+**The golden night (bonus):** a run that is **bump-free across all three stages and finishes under par** is worth **two nights instead of one**. Par is per run, not per stage, and derived (never authored) so it survives procedural generation and the streak speed lever:
+
+```
+parMs = Σ over the 3 stages of [ (routeTiles / effectiveSpeed) × 1000 × parSlack
+                                 + junctionCount × junctionThinkMs ]
+```
+
+`parSlack` 1.25, `junctionThinkMs` 12000. The junction allowance is deliberately huge because `G.stageMs` runs during the `junction` phase — twelve seconds per junction means a careful, chatty pair beats par and only genuine stalling loses it. **The briefing is untimed and stays untimed.** Par measures time underground only, is **never shown during a stage** (a visible clock breaks §10), and surfaces only on the run-complete card. **Once per calendar day, first qualifying run only** — the seed is replayable, and a memorised maze would otherwise unlock everything in an afternoon. Celebration: two gold pips instead of one, a rising two-note chime, a distinct haptic, a scatter of gold particles, and the line *"A golden night."* A small gold-moon outline always sits beside the next peg so the pair know the bonus exists without ever being told a target time.
+
+**The object:** four pegs, one hat per world (every world has a hat — the joke of the whole series). Unlocked pegs hold their hat in full colour; locked pegs hold a **pale silhouette** — the shape is the tease, never a padlock. Beneath the next locked peg, **sleeps remaining as countable moons** (shown when `rackPipThreshold` 7 or fewer remain).
+
+**First appearance:** not before World Two is reached. The run that hits five days swings the rack into view and lands hats on pegs 1 & 2 together (backfilling), two silhouettes waiting. From then on it shows on every run-complete card.
+
+**Where it appears:** the run-complete card (always, once unlocked) and the world picker (the rack *is* the picker, §14). Never mid-stage, never in the briefing, no percentages or bars.
+
+**The unlock ceremony (worlds three & four):** the rack fills the screen (stats deferred); the new hat drops onto its peg with a distinct fanfare and a celebratory haptic; one line — *"A new hat."* / *"Somebody has lost this one."* (Deep Water: *"This one is not ours."*); chord to continue; then the stats card.
+
+**Tone for the counter:** never reference absence. No "you missed yesterday", no streak-loss copy. It states only what is true now: this many hats, this many sleeps.
+
+**Playtest mode (Marty only):** a sealed mode unlocking all four worlds immediately, via three doors — URL `?unlockAll=1`, the dev-panel button ("Take all the hats down"), or the 4-3-2-1 rack gesture within four seconds. While on, all writes (`journal`, `daysPlayed`, `streak`, `best`, `seedbest:*`) are suppressed; reads work so the rack renders truthfully. The tell: a gold moon in the rack corner and `PLAYTEST` in the debug overlay.
+
+## 12. World Three — The Forest (**built**, roadmap v2.7)
+
+Homage in spirit to *I Want My Hat Back*. All original assets. **Rung six: route reversal** — going back the way you came, the operation that turns a route into a map. It also teaches that **the answer was on screen the whole time**: the rabbit wears the stolen hat from the first briefing frame; the bear never notices; Alma will, instantly, and the eyes-closed Driver can do nothing until the bear works it out himself. That gap is the world.
+
+**Structure — two legs and a red page (one maze, traversed twice):**
+- **Leg 1, the search (down-screen):** the bear enters at the top and walks down the spine; animals sit at the arm tips. Chord to keep going down, green/red to turn into an arm.
+- **The red page:** arriving at the deer (leg-1 exit) floods the screen full-bleed saturated red for `forestRedPageMs` with one line — *"He knows where his hat is."* — and the longest haptic in the game. Never a strobe at any setting; reduced-motion makes it a hold.
+- **Leg 2, the run back (up-screen):** the goal becomes the rabbit's arm tip, speed × `forestReturnSpeedMult`. The trodden path stays drawn but **the animals and the rabbit are gone** — Alma must remember which arm, and which side. A wrong arm bumps, bounces back, try again.
+
+**The load-bearing constraint:** Forest stages are **chord-only** (`stageChordShare:[1,1,1]`). A chord junction leaves vertically, so the return enters vertically and the calls stay exactly chord / green / red in both legs — green is still screen-left, the world never flips. Leg 2 needs no new maze: start = deer cell heading up, exit = rabbit's arm.
+
+**Meeting an animal** is a conversation, not a bump: the bear stops, a bubble holds for `speakerLineMs`, a soft chime marks it, then a **polite turnaround** back to the junction — no bonk, no shake, **no bump counted**. Bare arms still bump (trees aren't conversational). Bubbles are **pictograms** (`forestSpeechMode:'pictures'`, a `'words'` toggle gives NO/OK): most animals a slashed hat, the asker a hat outline with a "?", **the rabbit three slashed hats crammed in** (protesting far too much), the sleeper a "z". **The deer beat** shows an empty hat outline; the bear's bubble fills the same shape red — two identical silhouettes, the whole story in shape and colour — then the red page. **The silent joke:** one animal is always asleep and never answers (the cat's/lizard's cousin). **Return-leg difficulty:** rabbit hidden (`forestShowRabbitOnReturn:false`) with a hint after `forestHintAfterBumps` (3) wrong arms.
+
+**Reveal:** two weights — leg 1 soft grey, leg 2 charcoal ink (`#33291F`) — the whole journey at a glance; animals redrawn, the rabbit hatless. **Run complete:** the bear sitting in his hat, deadpan; a squirrel wanders in asking about a rabbit in a hat, the bear says no and asks why he's asking; nothing is explained. World Three signs off with a question nobody answers.
+
+**Art:** elevation forest floor; tree-trunk walls in two greens and a grey-brown; warm ivory ground (`#EFE7D6`, paler than soil — air, not earth); one saturated red for the hat only (`#B23A48`). The bear is large, upright, mirrored not rotated, one dot eye, no expression ever.
+
+## 13. World Four — Deep Water (**built**, roadmap v2.8)
+
+Homage in spirit to *This Is Not My Hat*. All original assets. **Rung seven: building a map from partial views** — every earlier world hands the Navigator a complete map at briefing; Deep Water hands her a few seconds of one, then the light goes. What she holds in her head after that is cartography.
+
+**The lantern and the flash:** near-black water; the Navigator sees a soft circle of `deepFogRadiusTiles` around the little fish, and **everywhere it has swum stays lit permanently** — the map draws itself, and that is the whole feature. The **briefing flash** lights the entire ocean for `deepBriefingFlashMs` (default 4000, a dev-panel dial — §16.1), then it goes dark; the briefing stays untimed. In the dense **kelp** at the goal the fog shrinks to `deepFogPlantsRadiusTiles`. Fog is a soft-edged mask over the static ocean, **no hard vignette**.
+
+**The crab** (Deep Water's silent-joke slot): once per stage, beside one junction; swim within a tile and it points, lighting `crabHintTiles` down the correct branch, then goes back to sunning. Not required, not scored, easy to miss.
+
+**The big fish:** mechanically the crumb-follow dog at `deepPursuerLagTiles` behind — so it backs up in unison when the little fish bounces, can never collide (no collision code), and is **never a fail state**. Visible to the Navigator, invisible to the Driver — the correct distribution of dread.
+
+**The scripted ending (cannot be avoided):** the goal sits in the kelp; on arrival both fish hold inside the plants, a `deepEndingMs` stillness, then the breakthrough — and in the run-complete scene the big fish sits, hatted, motionless, facing the reader. **World Four signs off with silence.**
+
+**The score is the survey, not the chase:** because the ending is fixed, the achievement is `mapLitPct` — lit cells over open cells — shown as *"You saw N% of the ocean"* with an all-time best (`deepMapLitStat`). **Reveal:** the route as a dotted bubble-trail with bump stars, and **the unexplored dark left exactly as it was** — the shape of what you missed, the reason to come back. The journal thumbnail draws only what was lit, a different shape every day. Mixed junctions (unlike the Forest's chord-only spine), its own daily-seed stream, tunnel fixtures as the never-broken fallback. Bumps are **tangles** (a wet muffled catch). Palette: `water` #0E1A24, `waterLit` #16303C, `kelp` #2F5147/#3F6A55, fish pale ivory (`#E8E0CE`), one accent blue for the hat only (`hatBlue` #3E6E9C, `hatBrim` #2E5578).
+
+## 14. Engine work (all **built**)
+
+The engine is world-agnostic behind the `WORLDS` hooks; nothing here changed the input model, the junction invariant, the chord, the bump economy, the streak system, the daily seed, the journal shape, or CONFIG discipline.
+
+1. **Progression module** — `daysPlayed`, journal-derived migration, threshold table, unlock state.
+2. **Par & the golden night** — per-run par from the optimal route, bump-free check, once-per-day cap; par never surfaces during play.
+3. **The hat rack** — render, pip fill, first-appearance backfill at World Two, unlock ceremony; shared by the run-complete card and the picker.
+4. **Playtest mode** — three doors, write suppression, the gold-moon tell.
+5. **The N-world picker** — the rack *is* the picker. Two unlocked worlds keep the direct green/red pick; at three or more it becomes a stepper: **green steps left, red steps right, chord goes there**, locked pegs skipped. No new touch targets.
+6. **Multi-leg stages** (Forest) — leg 1 goal, cinematic beat, leg 2 start/heading/goal (the same maze, ends swapped).
+7. **Full-screen beat** (the red page) — reduced-motion safe, non-strobing.
+8. **Bubble overlay & polite turnaround** — pictogram bubbles with a words toggle; a bounce variant that skips the bonk and counts no bump.
+9. **Two-weight reveal trace** (Forest).
+10. **Fog mask & seen-set** (Deep Water) — per-stage lit-cell set, soft-edged mask, `mapLitPct` and its all-time best.
+11. **Briefing flash** (Deep Water) — timed full reveal, then dark.
+12. **Pursuer** (Deep Water) — the crumb-follow companion, longer lag, no collision logic.
+13. **Scripted ending** (Deep Water) — hold, emerge, hat.
+14. **Journal thumbnails** — the Forest draws both legs; Deep Water draws only what was lit. Journal, streak, seed and bests stay shared. One streak, one journal, four worlds.
+
+## 15. CONFIG
+
+All the keys these worlds need are already in the `CONFIG` object in §8 — the rack/golden-night/playtest block, the Forest block, and the Deep Water block. Existing rule stands: **no magic numbers in gameplay code.**
+
+## 16. Open — playtest tuning (not code to write)
+
+These are one-line CONFIG changes after a real session with Alma and a grown-up, not features to build:
+1. **Deep Water's briefing flash** — 4000ms is a placeholder. Try 2000 / 4000 / 6000 from the dev panel; keep whichever makes Alma lean in rather than freeze.
+2. **Par feel** — `parSlack` 1.25 and `junctionThinkMs` 12000. If a golden night ever feels like it rewarded rushing, `junctionThinkMs` goes **up**, not down.
+3. **`forestHintAfterBumps`** — shipping at 3; revisit after the first run back.
+4. **Whether the squirrel beat stays** — written in, easy to cut. You'll know when you see it drawn.
+
+---
+
+# What's left to build (index)
+
+Everything through the four worlds and §11–§16 is shipped. The full picture lives in the §6 roadmap; this is the short list of what is *not* built, so it's clear at a glance:
+
+- **The Map panel (v2, committed — the only committed-but-unbuilt feature).** Navigator sees the maze map with the digger's position marker updating only at junctions. Groundwork flag `positionUpdateAtJunctionsOnly` is in CONFIG but not yet read. This is the §3 information-scaling axis and the on-ramp to v3 memory mode. *(See §6 v2.)*
+- **v3 — Deepen the learning** *(future; see §6):* map/memory modes, timed junction windows as an unlockable "spicy" modifier (the raw `junctionPauseMs` mechanic already works — only the unlock wrapper is missing), loops + soft-soil chutes in generation, per-junction-type sound design, and World Two line-of-sight mode (`lineOfSight` is a declared-but-unread flag).
+- **v4 — Stretch** *(only if the ritual sticks; see §6):* role swap, two-device mode, finger-drawn maze editor.
+- **§16 tuning** is playtest calls, not code.
