@@ -12,6 +12,8 @@ Companion to `CLAUDE.md`. Merge into it as **§11–§16**, or keep as a sibling
 
 **Decisions locked in this revision:** thresholds 5 / 10 / 15 days · one currency (days played) · golden-night bonus = no bumps **and** under par, once per calendar day · rack appears only on reaching World Two · Forest speech is pictures with a words toggle · Forest trace charcoal · Forest built first · deadpan endings kept as the books leave them.
 
+**Later decision — the plan trace is cut.** The plan trace (a briefing finger-trace, plan-vs-actual at the reveal) was never built and has been dropped from the game entirely. Every reference below that once described it as *pending* is superseded: it is not coming. The plan-then-execute beat lives in the spoken briefing, and the two buttons stay the only touch targets in every phase. The `planTraceEnabled` / `planTraceOnReturnLeg` CONFIG flags are removed.
+
 ---
 
 ## §11 The Hat Rack — progression made visible
@@ -94,7 +96,7 @@ A sealed mode that unlocks all four worlds immediately, for testing ahead of the
 
 ## §12 WORLD THREE — THE FOREST
 
-**Status: BUILT** (see `CLAUDE.md` roadmap v2.7 for the shipped summary; this section remains the authoritative design intent). Shipped faithful to the spec below with one deferral: the return-leg **plan trace** (`planTraceOnReturnLeg`) has its CONFIG flag but not the finger-trace, which waits on the shared v2 plan-trace work still pending across every world.
+**Status: BUILT** (see `CLAUDE.md` roadmap v2.7 for the shipped summary; this section remains the authoritative design intent). Shipped faithful to the spec below. The one item once deferred — the return-leg **plan trace** — has since been **cut** (see the note at the top of this file); it is not coming.
 
 Homage in spirit to *I Want My Hat Back*. All original assets.
 
@@ -144,8 +146,8 @@ Arriving at an arm tip holding an animal is **a conversation, not a bump**:
 
 **The silent joke:** one animal is always asleep and never answers, in every stage, forever. The bear asks anyway. It is never remarked upon. (World One's cat, World Two's lizard, World Three's sleeper.)
 
-### Plan trace
-This is the world it was invented for. During the red page the game holds and lets Alma **ink the way back** with her finger before the bear moves. Plan in soft grey, actual in ink, compared at the reveal. `planTraceOnReturnLeg: true`. Skippable, as always.
+### Plan trace — CUT
+This was once billed as the world the plan trace was invented for (holding on the red page to let Alma ink the way back before the bear moves). The plan trace has since been **cut from the game entirely** — see the note at the top of this file. The return leg simply begins; there is no finger-trace.
 
 ### Return-leg difficulty
 Ship with the rabbit hidden (`forestShowRabbitOnReturn: false`) and a hint after three wrong arms (`forestHintAfterBumps: 3`) — the rabbit reappears briefly, no comment, no penalty. Take the hint away when she stops needing it.
@@ -159,7 +161,7 @@ The bear, sitting, wearing the red hat, facing the reader. Deadpan. A squirrel w
 ### Art direction (delta from §5 of CLAUDE.md)
 - **View:** elevation, side-on, on the forest floor. Tree trunks are the impassable walls — flat vertical bands in two greens and a grey-brown, no outlines over 1px, occasional flat root wedges. Background a warm ivory (`#EFE7D6`), noticeably paler than World One's soil: the forest reads as air, not earth.
 - **Palette:** ivory ground, `bark` #6B5A44, `canopy` #6C7A55, `moss` #8A9468, animals in two or three flat muted colours each, and **one saturated red for the hat and only the hat** (`#B23A48`).
-- **The red belongs to the hat here.** The Forest's reveal trace goes **charcoal** `#33291F` at 85% alpha; the grey plan line is unchanged.
+- **The red belongs to the hat here.** The Forest's reveal trace goes **charcoal** `#33291F` at 85% alpha.
 - **The bear:** large, upright, mirrored not rotated (elevation rules), one dot eye, no expression at any point including the end. He fills more of a cell than the digger does — his size against a small rabbit is the comedy.
 - **Motion:** minimal. A slow two-frame plod. The red page is the only large motion event besides bumps. Under `prefers-reduced-motion` the red page becomes a hold, not a flash — **and it is never a strobe at any setting.**
 
@@ -267,7 +269,7 @@ Sequenced for Claude Code. Nothing here changes the input model, the junction in
 
 **World Four**
 10. **Fog mask and seen-set** — per-stage lit-cell set, soft-edged mask, `mapLitPct` stat and its all-time best.
-11. **Briefing flash** — timed full reveal, then dark, plan trace live throughout.
+11. **Briefing flash** — timed full reveal, then dark. (The "plan trace live throughout" this once carried is cut.)
 12. **Pursuer** — reskin of the crumb-follow dog, longer lag, no collision logic.
 13. **Scripted ending** — hold, emerge, hat.
 
@@ -304,7 +306,6 @@ forestSpeechMode: 'pictures', // 'pictures' | 'words'
 speakerLineMs: 1800,
 forestShowRabbitOnReturn: false,
 forestHintAfterBumps: 3,
-planTraceOnReturnLeg: true,
 
 // World Four — Deep Water
 swimSpeed: 0.85,

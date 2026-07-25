@@ -6,7 +6,7 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 
 **Changelog vs previous CLAUDE.md:**
 - New **§6 v1.1** polish list from blindfolded-playtest review (press acknowledgement, per-button haptic signatures, wake-lock coverage, Do Not Disturb nudge).
-- New **v2 feature: the plan trace** — Navigator inks her intended route during the briefing; the reveal compares plan vs actual. This is the core map-reading teaching mechanic.
+- **The plan trace is cut.** Earlier revisions planned a v2 briefing finger-trace (the Navigator inking her intended route, compared against the actual path at the reveal). It was never built and has now been dropped from the game — the two buttons stay the *only* touch targets, in every phase, of every world. Its CONFIG flags and roadmap items are removed accordingly.
 - New **§7: World Two — The Hat**, a top-down overworld mode (homage to *We Found a Hat*), slotted into the roadmap as v2.5. Same two buttons, same colour grammar, new perspective.
 - New **§11 The Hat Rack (built)** — the invisible `hatUnlockRuns` gate is replaced by a visible, countable progression object driven by **days played** (see `WORLDS-THREE-AND-FOUR.md` §11, the authoritative spec). Adds the golden-night bonus and a sealed playtest mode. **World Three — The Forest is built** (§12, roadmap v2.7) and **World Four — Deep Water is now built** (§13, roadmap v2.8) — the fourth peg fills from a silhouette to a blue bowler at 15 days played.
 - New CONFIG keys in §8 to support all of the above.
@@ -24,7 +24,7 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 ### Navigator (child — eyes open)
 - Watches the screen: sees the world, the character, and (from v2) a map panel.
 - Gives verbal directions using the colour vocabulary (below).
-- Cannot touch the screen during a stage. Her controller is her voice. (Exception from v2: the briefing plan trace, which happens eyes-open before the stage starts.)
+- Cannot touch the screen at any point. Her controller is her voice, always — there is no sanctioned Navigator touch in any phase.
 
 ### Colour vocabulary (core mechanic — non-negotiable, shared by every world)
 - Directions are **screen directions** — exactly what the Navigator sees on the map, never relative to the character. A 4.5-year-old must never have to mentally rotate ("his left or my left?"). What Alma sees is what the buttons do.
@@ -42,7 +42,7 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 2. **Digging (eyes closed):** The digger auto-digs forward at constant speed. At each junction the digger **pauses** and an audio cue plays (a soft "hm?" plus a haptic tick). The Driver presses GREEN (screen-left), RED (screen-right), or BOTH TOGETHER (straight on) as directed, and the digger waits until a press arrives (v1). With timed windows (v3+), no press = digger continues straight if straight exists, otherwise bumps. **Every accepted junction press gets an immediate acknowledgement tick + haptic (v1.1)** — an eyes-closed Driver must never wonder whether the game heard them.
 3. **Bumps:** Hitting rock/roots/dead-end soil = a comedy event, not a failure. Screen shake, dust puff, a silly *thud-boing* sound, strong haptic buzz, the digger's helmet slips over its eyes. The digger **bounces back to the last junction** and re-pauses. Bumps are counted but never end a run.
 4. **Breakthrough (stage complete):** The digger breaks through into a cavern or up through the surface — a soft, satisfying collapse of dirt. Fanfare, haptic celebration. On-screen banner: "OPEN YOUR EYES!"
-5. **Reveal (eyes open):** The full maze is shown with the actual path traced in a contrasting line, **bump locations marked with little stars/bruise icons** — this is the laugh-together moment. (From v2: the plan line is shown underneath in soft grey, so plan vs actual is the conversation.) Stats: time, bumps, personal best comparison. Both players tap their button together to continue.
+5. **Reveal (eyes open):** The full maze is shown with the actual path traced in a contrasting line, **bump locations marked with little stars/bruise icons** — this is the laugh-together moment. Stats: time, bumps, personal best comparison. Both players tap their button together to continue.
 
 A **run** = 3 stages (easy → medium → spicy). A run takes roughly 5–10 minutes total. Short is a feature.
 
@@ -71,13 +71,13 @@ The digger auto-moves. The Driver only ever chooses at junctions. Complexity the
 
 **The Navigator's information also scales** (this is the real difficulty axis):
 - v1: Navigator sees the digger's live position on the full maze. Builds trust and vocabulary.
-- v2: "Map mode" stages — Navigator sees the maze map but the digger's position marker updates only at junctions. Plus the plan trace at briefing.
+- v2: "Map mode" stages — Navigator sees the maze map but the digger's position marker updates only at junctions.
 - v3: "Memory mode" — position marker disappears after the briefing; Alma tracks the digger mentally. This is the deepest spatial-reasoning workout and is unlocked, never forced.
 - v2.5: **Perspective scaling** — World Two shifts the whole world from cross-section (elevation view) to bird's-eye (plan view). Same grammar, new mental model. See §7.
 
 **The spatial-learning ladder this game is climbing (design intent, keep in mind for every feature):**
 1. Colour-direction vocabulary and screen left/right (v1)
-2. Plan-then-execute: commit to a route before moving, compare after (v2 plan trace)
+2. Plan-then-execute: agree a route aloud at the briefing before moving, then see how it went at the reveal (the briefing conversation; the inked plan trace that once served this was cut)
 3. Delayed and withheld position information (v2 map mode, v3 memory mode)
 4. Perspective shift: plan view of a territory you're navigating (v2.5, World Two)
 5. Landmark-based navigation language: "green at the cactus" (v2.5, World Two)
@@ -128,13 +128,13 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - **Wake-lock coverage:** request the wake lock at briefing (not just stage start) and re-request on visibility change in all non-terminal phases, so a slow chat over the briefing map never dims the screen.
 - **Do Not Disturb nudge:** the first briefing of a session shows one quiet line: "Tip: turn on Do Not Disturb — the Driver can't see notifications coming." A banner mid-stage while blindfolded is catastrophic; we can't block it in a web page, so we say it once, politely.
 
-### v2 — Make it a ritual (built, except the map panel + plan trace — see below)
+### v2 — Make it a ritual (built, except the map panel — see below)
 - **(built)** Procedural maze generation from daily date seed, 3-stage ramp. Validator-first, with the v1 hand-authored mazes kept permanently as the never-broken fallback.
 - **(built)** Streak system + streak-driven difficulty (capped, as §4). One-day grace before a streak bends; two missed days start a new count.
 - **(built)** Gems + dead-end temptations + the dog's gem-sense (the ear prick). World One only; the desert's treasure joke stays the second hat.
 - **(built)** Journal: stamped entries per completed run (date, stats, maze thumbnail — footprints in the desert). Shared across worlds. localStorage array, capped at ~200 and quota-safe (trims oldest first). Minimal surface in v2: the fresh page shows on the run-complete card; a browsable book waits. (The referenced Creature Keepers file has since been removed from the repo, so the same journaling *shape* was implemented independently.)
 - *pending* — Map panel for the Navigator alongside the live view.
-- *pending* — **The plan trace (key spatial-learning feature):** during the briefing, the Navigator traces her intended route on the maze with her finger; the game inks it as a soft grey line. (This is the one sanctioned Navigator touch, and only during briefing.) At the reveal, the plan line is drawn underneath the actual red path. Where they diverge is the teaching moment — "we planned green here but went red!" No scoring, no judgement, ever: the plan is a conversation piece, not a target. Skippable — some days you just dig. Config: `planTraceEnabled`.
+- *cut* — **The plan trace.** Once planned as the key plan-then-execute mechanic (a briefing finger-trace inked in soft grey, drawn under the actual path at the reveal). Never built, now dropped: the plan-then-execute beat lives in the spoken briefing instead, and the two buttons remain the only touch targets in every phase.
 
 ### v2.5 — World Two: The Hat (built — see §7 for the full spec)
 - **(built)** H1: three hand-authored overworld stages, the two tortoises, landmarks, shell-bonks, footprint reveal, sunset scene. World picker at boot.
@@ -154,7 +154,7 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - **(built)** The **deer beat** (two identical hat silhouettes, the bear's filled red) → the **full-bleed red page** ("He knows where his hat is.", the longest haptic, non-strobing, reduced-motion-safe) → leg 2, the bear facing up. On the run back the animals are gone; a wrong arm bumps and, after `forestHintAfterBumps`, the rabbit flickers back.
 - **(built)** The **two-weight reveal** (leg 1 soft grey, leg 2 charcoal ink, the rabbit redrawn hatless) and the deadpan run-complete scene: the bear sitting in his hat, a squirrel wandering in with a question nobody answers.
 - **(built)** The **N-world picker** (§14.5): with three or more worlds unlocked the rack becomes a stepper — **green steps left, red steps right, the chord goes there**; locked pegs are skipped. Two unlocked worlds keep the original direct green/red choice. No new touch targets either way.
-- *pending* — The plan trace on the return leg (`planTraceOnReturnLeg`): the CONFIG flag is in, but the finger-trace itself waits on the shared v2 plan-trace work, still pending across all worlds.
+- *cut* — The plan trace on the return leg: dropped along with the plan trace everywhere (the finger-trace was never built).
 
 ### v2.8 — World Four: Deep Water (built — see `WORLDS-THREE-AND-FOUR.md` §13 for the full spec)
 - **(built)** The lantern and the seen-set — the ladder's seventh rung, **building a map from partial views**. Near-black water; the Navigator sees a soft circle of `deepFogRadiusTiles` around the little fish, and **everywhere it has swum stays lit permanently**, so the map draws itself. Rendered as a soft-edged fog mask over the static ocean (no hard vignette), erased along the swum path; a mid-stage relayout re-lights the known cells from the seen-set.
@@ -162,7 +162,7 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 - **(built)** The **big fish** — mechanically the crumb-follow dog, reskinned, at `deepPursuerLagTiles` behind; it backs up in unison when the little fish bounces, can never collide, and is **never a fail state**. Visible to the Navigator, invisible to the Driver — the correct distribution of dread. The **crab** (Deep Water's silent-joke slot) points once, lighting `crabHintTiles` down the correct branch, then goes back to sunning.
 - **(built)** The **scripted ending** that cannot be avoided (`deepEndingMs`): both fish inside the plants, a held stillness, then the breakthrough — and in the run-complete scene the big fish sits, hatted, motionless, facing the reader. **World Four signs off with silence.**
 - **(built)** The score is the **survey, not the chase** — `mapLitPct` ("You saw N% of the ocean", `deepMapLitStat`) with an all-time best, since the ending is fixed. The reveal inks a dotted bubble-trail and leaves **the unexplored dark exactly as it was**; the journal thumbnail draws only what was lit, a different shape every day. Mixed junctions (unlike the Forest's chord-only spine), own daily seed stream, tunnel fixtures as the never-broken fallback. Journal, streak, seed and bests stay shared — one streak, one journal, four worlds.
-- *pending* — The plan trace live through the briefing flash: waits on the shared v2 plan-trace work.
+- *cut* — The plan trace live through the briefing flash: dropped along with the plan trace everywhere.
 
 ### v3 — Deepen the learning
 - Map mode and Memory mode stages (Navigator information scaling, §3) — across the worlds.
@@ -206,7 +206,7 @@ Two tortoises in a scrubby desert. The **Watcher** (Alma's avatar) sits on a tal
 - The Watcher tortoise on its rock slowly turns its head to keep facing the Seeker throughout the stage — the only "camera" in the game, and it's a tortoise.
 
 ### Reveal & run completion
-- The reveal spread shows the whole desert from above with the Seeker's **footprint trail** dotted through the sand, shell-bonk stars at every bonk, the plan-trace line underneath (v2 systems shared).
+- The reveal spread shows the whole desert from above with the Seeker's **footprint trail** dotted through the sand and shell-bonk stars at every bonk (v2 reveal systems shared).
 - **Run complete:** the Seeker reaches the hat and puts it on. Final scene (an homage in spirit to the book's last page — **all original art**, no reproduction of Klassen's illustration): a black sky full of stars, the two tortoises side by side, each wearing a hat, drifting off among them. Nobody says anything. World Two closes here — the **chocolate milk and animal biscuits** snack is World One's sign-off; the stars are the Hat's. The ritual is shared (one streak, one journal); only the closing image differs.
 
 ### Art direction (delta from §5)
@@ -261,7 +261,6 @@ const CONFIG = {
   // navigator information
   showLiveDigger: true,     // v1 true; map/memory modes flip this
   positionUpdateAtJunctionsOnly: false,
-  planTraceEnabled: true,   // briefing finger-trace + plan-vs-actual reveal (v2)
   lineOfSight: false,       // Watcher sees only what's visible from the rock (v3, World Two)
   // progression & the hat rack (§11, built)
   worldUnlockDays: { tunnels:0, hat:5, forest:10, deep:15 }, // days-played thresholds
@@ -285,7 +284,6 @@ const CONFIG = {
   speakerLineMs: 1800,           // how long an animal's bubble holds
   forestShowRabbitOnReturn: false, // keep the rabbit hidden on leg 2
   forestHintAfterBumps: 3,       // wrong arms before the rabbit flickers back
-  planTraceOnReturnLeg: true,    // flag in; the finger-trace waits on v2 plan trace
   // World Four — Deep Water (§13, built)
   swimSpeed: 0.85,               // the little fish drifts, unhurried
   deepFogRadiusTiles: 2.2,       // the lantern in open water
@@ -312,8 +310,8 @@ Rule: **no magic numbers in gameplay code** — if it affects feel, it goes in C
 - Audio: Web Audio API, synthesised or tiny embedded sounds — must work after a user gesture (the ready-signal press unlocks audio).
 - Haptics: `navigator.vibrate()` where available; degrade silently.
 - The screen must **never sleep mid-stage**: use the Screen Wake Lock API with graceful fallback; request at briefing and re-request on visibility change in all non-terminal phases (v1.1).
-- Accidental exits are catastrophic mid-stage (eyes closed!): no touch targets other than the two buttons during play; ignore multi-touch outside them. The plan trace (v2) accepts canvas touches **only during the briefing phase**.
+- Accidental exits are catastrophic mid-stage (eyes closed!): no touch targets other than the two buttons, in any phase; ignore multi-touch outside them. (The dev panel's sky-tap and the rack's peg hit-areas are the only non-button touch surfaces, and never during play.)
 
 ## 10. Tone Rules (for every string and sound in the game)
 
-Bumps and bonks are funny. Nothing is ever a failure. The game never says "wrong", "oops" in a scolding way, or shows a red X. Stats celebrate ("smoothest run yet!") and never shame. The plan trace is never scored against — divergence is a story, not an error. The Driver being helpless is the joke; the Navigator being capable is the point. The tortoises never speak. The hat is never explained.
+Bumps and bonks are funny. Nothing is ever a failure. The game never says "wrong", "oops" in a scolding way, or shows a red X. Stats celebrate ("smoothest run yet!") and never shame. The Driver being helpless is the joke; the Navigator being capable is the point. The tortoises never speak. The hat is never explained.
