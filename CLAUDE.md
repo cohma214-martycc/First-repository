@@ -10,6 +10,12 @@ This file is the source of truth for Claude Code. Build exactly to this spec unl
 - New **§7: World Two — The Hat**, a top-down overworld mode (homage to *We Found a Hat*), slotted into the roadmap as v2.5. Same two buttons, same colour grammar, new perspective.
 - New **§11 The Hat Rack (built)** — the invisible `hatUnlockRuns` gate is replaced by a visible, countable progression object driven by **days played** (see §11). Adds the golden-night bonus and a sealed playtest mode. **World Three — The Forest is built** (§12, roadmap v2.7) and **World Four — Deep Water is now built** (§13, roadmap v2.8) — the fourth peg fills from a silhouette to a blue bowler at 15 days played.
 - New CONFIG keys in §8 to support all of the above.
+- **Picker-at-boot, always.** The world picker now opens at the start of
+  every session — even with only Tunnels' hard hat on the rack. The
+  silhouettes of what's still to come are the point; a returning player
+  should feel the rack every time, not just once a second hat exists.
+  Supersedes the old day-5 gate on the picker's *appearance* only — the
+  days-played unlock ladder itself (§11) is unchanged. See §7 and §11.
 - **This file is now the single source of truth.** The former `WORLDS-THREE-AND-FOUR.md` (worlds 3 & 4, the rack, engine work, tuning) and `BUILD_PLAN.md` (the shipped v2→v2.5 build order) have been folded in and deleted — §11–§16 hold the worlds/rack detail, and a closing roadmap section lists everything still unbuilt.
 
 ---
@@ -217,7 +223,14 @@ Two tortoises in a scrubby desert. The **Watcher** (Alma's avatar) sits on a tal
 
 ### World picker
 - At boot, a simple picker card: **GREEN button = Tunnels, RED button = The Hat.** The buttons teach themselves. (Chord = replay whichever world you played last.) No menus, no scrolling, no third touch target.
-- ~~World Two unlocks after `hatUnlockRuns` completed tunnel runs (default 5)~~ **Superseded by §11 (built):** worlds unlock on **days played** (`worldUnlockDays`, The Hat at 5), not run counts. The picker appears once The Hat is earned (or immediately in sealed playtest mode); until then Tunnels boots directly. `hatUnlockRuns` remains in CONFIG for back-compat but no longer gates the picker.
+- ~~World Two unlocks after `hatUnlockRuns` completed tunnel runs (default 5)~~ **Superseded by §11 (built):** worlds unlock on **days played** (`worldUnlockDays`, The Hat at 5), not run counts. `hatUnlockRuns` remains in CONFIG for back-compat but no longer gates the picker.
+- ~~The picker appears once The Hat is earned (or immediately in sealed
+  playtest mode); until then Tunnels boots directly.~~ **Superseded:** the
+  picker now opens on **every boot**, from the very first session. With
+  one hat unlocked it shows that one peg in full colour and the rest as
+  pale silhouettes; either button (or the chord) begins Tunnels — there's
+  no choice to make yet, only the rack to notice. The silhouettes do the
+  talking; the game never says "more worlds are coming."
 
 ---
 
@@ -267,6 +280,7 @@ const CONFIG = {
   worldUnlockDays: { tunnels:0, hat:5, forest:10, deep:15 }, // days-played thresholds
   rackPipThreshold: 7,      // show countable sleeps when this few remain
   rackShowsFromWorldTwo: true, // no rack until The Hat (5 days) is reached
+  pickerAlwaysAtBoot: true,    // NEW — the picker opens every session, even with 1 hat unlocked
   rackEnabled: true,
   // the golden night (§11, built) — bump-free AND under par, once per calendar day
   goldenNightEnabled: true,
@@ -355,7 +369,17 @@ parMs = Σ over the 3 stages of [ (routeTiles / effectiveSpeed) × 1000 × parSl
 
 **First appearance:** not before World Two is reached. The run that hits five days swings the rack into view and lands hats on pegs 1 & 2 together (backfilling), two silhouettes waiting. From then on it shows on every run-complete card.
 
-**Where it appears:** the run-complete card (always, once unlocked) and the world picker (the rack *is* the picker, §14). Never mid-stage, never in the briefing, no percentages or bars.
+**Where it appears:** the world picker (the rack *is* the picker, §14) on
+**every boot, from day one** — a single lit peg with silhouettes waiting
+is the whole suspense. The run-complete card's rack keeps its existing
+gate, first appearing at World Two (5 days), since that's the unlock
+ceremony's reveal moment and should stay a surprise the first time it
+fills. Never mid-stage, never in the briefing, no percentages or bars.
+
+**Picker vs run-complete gating:** `rackShowsFromWorldTwo` continues to
+gate *only* the run-complete card's rack. The picker's rack ignores that
+flag entirely and always renders — controlled instead by
+`pickerAlwaysAtBoot` (default `true`).
 
 **The unlock ceremony (worlds three & four):** the rack fills the screen (stats deferred); the new hat drops onto its peg with a distinct fanfare and a celebratory haptic; one line — *"A new hat."* / *"Somebody has lost this one."* (Deep Water: *"This one is not ours."*); chord to continue; then the stats card.
 
@@ -403,6 +427,12 @@ The engine is world-agnostic behind the `WORLDS` hooks; nothing here changed the
 3. **The hat rack** — render, pip fill, first-appearance backfill at World Two, unlock ceremony; shared by the run-complete card and the picker.
 4. **Playtest mode** — three doors, write suppression, the gold-moon tell.
 5. **The N-world picker** — the rack *is* the picker. Two unlocked worlds keep the direct green/red pick; at three or more it becomes a stepper: **green steps left, red steps right, chord goes there**, locked pegs skipped. No new touch targets.
+
+   One unlocked world — the common case for a brand-new player — is its own
+   small case: the picker still opens, still shows the rack, but there's no
+   choice to make. Either button, or the chord, starts Tunnels. Copy reads
+   as an invitation ("Ready?") rather than a false either/or ("Green —
+   Tunnels / Red — Tunnels").
 6. **Multi-leg stages** (Forest) — leg 1 goal, cinematic beat, leg 2 start/heading/goal (the same maze, ends swapped).
 7. **Full-screen beat** (the red page) — reduced-motion safe, non-strobing.
 8. **Bubble overlay & polite turnaround** — pictogram bubbles with a words toggle; a bounce variant that skips the bonk and counts no bump.
@@ -432,6 +462,16 @@ These are one-line CONFIG changes after a real session with Alma and a grown-up,
 Everything through the four worlds and §11–§16 is shipped. The full picture lives in the §6 roadmap; this is the short list of what is *not* built, so it's clear at a glance:
 
 - **The Map panel (v2, committed — the only committed-but-unbuilt feature).** Navigator sees the maze map with the digger's position marker updating only at junctions. Groundwork flag `positionUpdateAtJunctionsOnly` is in CONFIG but not yet read. This is the §3 information-scaling axis and the on-ramp to v3 memory mode. *(See §6 v2.)*
+- **Picker-at-boot (spec change, not yet built).** Boot currently calls
+  `showPicker()` only when `getDaysPlayed() >= worldUnlockDays.hat` (or
+  playtest); otherwise it falls through to `setupStage(0)` straight into
+  Tunnels. Change: call `showPicker()` unconditionally at boot (still
+  after the initial `setupStage(0)` that preps the canvas/maze).
+  `renderPicker()` needs a single-world branch (§14.5) with its own copy
+  — e.g. "Ready?" / "Hold either button — or both — to dig in" — and
+  `rackVisible()`'s gate must be bypassed specifically inside the
+  picker's render path. The run-complete card's rack gate
+  (`rackShowsFromWorldTwo`) is untouched.
 - **v3 — Deepen the learning** *(future; see §6):* map/memory modes, timed junction windows as an unlockable "spicy" modifier (the raw `junctionPauseMs` mechanic already works — only the unlock wrapper is missing), loops + soft-soil chutes in generation, per-junction-type sound design, and World Two line-of-sight mode (`lineOfSight` is a declared-but-unread flag).
 - **v4 — Stretch** *(only if the ritual sticks; see §6):* role swap, two-device mode, finger-drawn maze editor.
 - **§16 tuning** is playtest calls, not code.
