@@ -164,17 +164,38 @@
 /* ---------------- CONFIG — every feel-affecting number lives here -------- */
 const CONFIG_DEFAULTS = {
   // movement
-  digSpeed: 1.0,            // tiles per second between junctions (World One)
+  digSpeed: 1.3,            // tiles/sec between junctions (World One) — buys back
+                            // the time the harder mazes cost (§3.1); topology is
+                            // the difficulty, duration stays put
   walkSpeed: 0.8,           // tiles per second (World Two, v2.5 — tortoise-slow is the joke)
   junctionPauseMs: 0,       // 0 = wait forever (v1 default); >0 = timed window
   bumpBouncePx: 24,         // comedy bounce distance
   bumpStunMs: 900,          // pause after bump/bonk before re-offering the junction
-  // maze generation (v2)
-  stageJunctions: [2, 4, 6],
+  // maze generation (v2) — NOW PER WORLD (§3.1). The flat keys below stay as
+  // the shared defaults and the dev-panel surface, but effectiveGenParams
+  // (stageIdx, world) reads genProfiles first, so World One can be raised
+  // without hardening the desert, the forest and the ocean too. Note
+  // stageDeadEnds/deepArms is how many arms are DEEP (2-3 tiles) — the dead-end
+  // COUNT always equals the junction count.
+  genProfiles: {
+    // World One: raised. Everything else holds today's values.
+    tunnels: { junctions:[4,6,8], deepArms:[3,5,7], chordShare:[0,0.4,0.5],
+               doubleArmShare:[0,0.30,0.45], cols:11, rows:14 },
+    hat:     { junctions:[2,4,6], deepArms:[1,2,3], chordShare:[0,0.4,0.5],
+               doubleArmShare:[0,0,0],       cols:9,  rows:12 },
+    forest:  { junctions:[2,4,6], deepArms:[1,2,3], chordShare:[1,1,1],
+               doubleArmShare:[0,0,0],       cols:9,  rows:12 },
+    deep:    { junctions:[2,4,6], deepArms:[1,2,3], chordShare:[0,0.4,0.5],
+               doubleArmShare:[0,0,0],       cols:9,  rows:12 },
+  },
+  stageJunctions: [2, 4, 6],    // shared default / fallback if a profile is missing
   stageDeadEnds: [1, 2, 3],     // how many dead-end arms are deep (all junctions grow one arm)
   stageChordShare: [0, 0.4, 0.5], // fraction of junctions where the answer is the chord
   mazeCols: 9, mazeRows: 12,
-  gemCount: 2, gemDeadEndBias: 0.7,
+  rowBudgetBase: 6,             // rows = max(profile.rows, rowBudgetBase + 2×J)
+  maxJunctionsPerStage: 12,     // hard clamp applied after the streak ramp
+  genAttempts: 120,             // carve attempts before the hand-authored fallback
+  gemCount: 3, gemDeadEndBias: 0.8,
   // overworld generation (v2.5+)
   landmarkCount: 4,         // nameable landmarks per Hat stage
   landmarkJunctionRadius: 1,// every junction within this many tiles of a landmark
@@ -228,6 +249,7 @@ const CONFIG_DEFAULTS = {
   speakerLineMs: 1800,           // how long an animal's bubble holds before the turnaround
   forestShowRabbitOnReturn: false, // keep the rabbit hidden on leg 2 (she must remember)
   forestHintAfterBumps: 3,       // after this many wrong arms, the rabbit flickers back
+  forestEasyUntilDays: 3,        // day-one Forest runs use the gentlest spine (§12)
   // World Four — Deep Water (§13): a lantern in near-black water. The map draws
   // itself as you explore; a briefing flash previews the whole ocean, then dark.
   // A big fish follows (a longer-lag dog) — visible dread, never a fail state.
@@ -267,7 +289,7 @@ const CONFIG = Object.assign({}, CONFIG_DEFAULTS, LS.get('config', {}));
     if(raw==='true') CONFIG[key]=true;
     else if(raw==='false') CONFIG[key]=false;
     else if(raw==='null') CONFIG[key]=null;
-    else if(raw.startsWith('[')){ try{ CONFIG[key]=JSON.parse(raw); }catch(e){} }
+    else if(raw.startsWith('[')||raw.startsWith('{')){ try{ CONFIG[key]=JSON.parse(raw); }catch(e){} }
     else if(raw!=='' && !isNaN(Number(raw))) CONFIG[key]=Number(raw);
     else CONFIG[key]=raw;
   }
@@ -382,7 +404,7 @@ function dailySeed(){
    graph is a tree: no loops, no accidental junctions, no horizontal
    junction ever. The validator below re-checks all of it independently.  */
 
-function tryCarve(cols, rows, J, deepTarget, chordShare, rnd){
+function tryCarve(cols, rows, J, deepTarget, chordShare, rnd, doubleArmShare){
   const grid = Array.from({length: rows}, ()=> Array(cols).fill('#'));
   const canCarve = (c,r,pc,pr)=>{
     if(c<0 || r<0 || c>=cols || r>=rows) return false;
@@ -427,6 +449,12 @@ function tryCarve(cols, rows, J, deepTarget, chordShare, rnd){
   // quota, and if the quotas can't be honoured the attempt is discarded
   let chordsLeft = Math.round(J * chordShare);
   let tsLeft = J - chordsLeft;
+  // double-armed crossings (§3.1): a chord junction that grows a dead arm on
+  // BOTH sides — degree 4, three live answers, an extra dead end, and no extra
+  // rows. Only a chord can double (a T already spends one side on the route),
+  // so the quota can never exceed the chord quota. A soft quota: a junction
+  // that can't fit two arms quietly falls back to one.
+  let doublesLeft = Math.min(chordsLeft, Math.round(J * (doubleArmShare || 0)));
 
   for(let ji=0; ji<J; ji++){
     const junLeft = J - ji - 1;
@@ -441,17 +469,26 @@ function tryCarve(cols, rows, J, deepTarget, chordShare, rnd){
     // so short descents starve T placement. Budget still gets the last word.
     const pickV = ()=> vMax >= 2? (rnd()<0.75? 2 : 1) : 1;
 
-    // chord junction: route continues straight down, arm tempts to one side
+    // chord junction: route continues straight down, arm tempts to one side —
+    // or, when the double quota calls for it, to BOTH sides (a 4-way crossing)
     const doChord = ()=>{
       const s0 = snap();
       const s = rnd()<0.5? 1 : -1;
-      if(growArm(c, r, s, armWant) < 1 && growArm(c, r, -s, armWant) < 1){ restore(s0); return false; }
+      let doubled = false;
+      if(doublesLeft > 0){
+        // canCarve's adjacency rule already permits the second arm: its first
+        // cell touches only the junction, which is its predecessor
+        if(growArm(c, r, s, armWant) >= 1 && growArm(c, r, -s, armWant) >= 1) doubled = true;
+        else restore(s0);   // one side wouldn't fit — back out, try a single arm
+      }
+      if(!doubled && growArm(c, r, s, armWant) < 1 && growArm(c, r, -s, armWant) < 1){ restore(s0); return false; }
       const V = pickV();
       let v = 0;
       for(let k=1;k<=V;k++){ if(canCarve(c, r+k, c, r+k-1)) v = k; else break; }
       if(v < 1){ restore(s0); return false; }
       for(let k=1;k<=v;k++) carve(c, r+k);
       r += v;
+      if(doubled) doublesLeft--;
       return true;
     };
 
@@ -516,10 +553,12 @@ function generateStageRows(stageIdx, baseSeed, params){
   const J = params? params.J : CONFIG.stageJunctions[stageIdx];
   const deep = params? params.deep : CONFIG.stageDeadEnds[stageIdx];
   const chordShare = params? params.chordShare : CONFIG.stageChordShare[stageIdx];
+  const doubleArmShare = (params && params.doubleArmShare)? params.doubleArmShare : 0;
   const rows = (params && params.rows)? params.rows : CONFIG.mazeRows;
-  for(let attempt=0; attempt<120; attempt++){
+  const cols = (params && params.cols)? params.cols : CONFIG.mazeCols;
+  for(let attempt=0; attempt<CONFIG.genAttempts; attempt++){
     const rnd = mulberry32(hash32(baseSeed, stageIdx*131071 + attempt*977));
-    const grid = tryCarve(CONFIG.mazeCols, rows, J, deep, chordShare, rnd);
+    const grid = tryCarve(cols, rows, J, deep, chordShare, rnd, doubleArmShare);
     if(grid && validateStage(grid, J).ok) return grid;
   }
   return null; // caller falls back to the hand-authored stage
@@ -556,13 +595,21 @@ function validateStage(rowsArr, expectedJunctions){
   cells.forEach(({c,r})=>{ if(m.isOpen(c+1,r)) edges++; if(m.isOpen(c,r+1)) edges++; });
   if(edges !== cells.length-1) issues.push('maze contains a loop');
 
-  let jCount = 0, leaves = 0;
+  // Degree 4 is legal (a double-armed crossing, §3.1) but degree 5 is not — a
+  // cell with every neighbour open has no unique arrival direction. The
+  // vertical-entry check applies to degree-4 cells exactly as to degree-3
+  // ones: that invariant, not the degree, is what a blindfolded Driver relies
+  // on. Each junction is expected to grow (deg - 2) dead arms, which is 1 for
+  // a T or a single-armed chord and 2 for a crossing — so an all-degree-3
+  // maze still expects exactly one dead end per junction, as before.
+  let jCount = 0, leaves = 0, expectedLeaves = 0;
   cells.forEach(cell=>{
     const deg = [[1,0],[-1,0],[0,1],[0,-1]]
       .filter(([dx,dy])=> m.isOpen(cell.c+dx, cell.r+dy)).length;
     if(deg >= 3){
       jCount++;
-      if(deg > 3) issues.push('4-way junction at '+cell.c+','+cell.r);
+      expectedLeaves += deg - 2;
+      if(deg > 4) issues.push('junction of degree '+deg+' at '+cell.c+','+cell.r);
       const p = parent.get(ck(cell.c, cell.r));
       if(!p || p.c !== cell.c) issues.push('junction entered horizontally at '+cell.c+','+cell.r);
     }
@@ -570,7 +617,7 @@ function validateStage(rowsArr, expectedJunctions){
                  && !(cell.c===m.exit.c && cell.r===m.exit.r)) leaves++;
   });
   if(jCount !== expectedJunctions) issues.push('junction count '+jCount+' != '+expectedJunctions);
-  if(leaves !== jCount) issues.push('dead-end count '+leaves+' != junction count '+jCount);
+  if(leaves !== expectedLeaves) issues.push('dead-end count '+leaves+' != expected '+expectedLeaves);
   return {ok: issues.length===0, issues};
 }
 
@@ -610,7 +657,7 @@ function solveMaze(rowsArr){
 }
 
 function stageRowsFor(idx){
-  const gen = generateStageRows(idx, G.runSeed, effectiveGenParams(idx));
+  const gen = generateStageRows(idx, G.runSeed, effectiveGenParams(idx, 'tunnels'));
   if(gen) return { name:'Stage '+(idx+1), rows:gen, generated:true };
   const fb = FALLBACK_STAGES[idx];
   return { name: fb.name, rows: fb.rows, generated:false };
@@ -702,17 +749,29 @@ function currentStreak(){
 }
 
 /* One lever per notch: junctions first, then dead-end depth, then speed.
-   Stage 1 is never nudged — the teaching stage stays the teaching stage.  */
-function effectiveGenParams(stageIdx){
+   Stage 1 is never nudged — the teaching stage stays the teaching stage.
+   Parameters are per world (§3.1): the profile table is what stops World One's
+   raised baseline leaking into the desert, the forest and the ocean. A world
+   without a profile falls back to the flat shared keys.                     */
+function effectiveGenParams(stageIdx, world){
+  const prof = (CONFIG.genProfiles || {})[world === undefined? G.world : world] || null;
+  const base = (key, flat)=> (prof && prof[key])? prof[key][stageIdx] : CONFIG[flat][stageIdx];
   const notch = currentStreak().notch;
-  let J = CONFIG.stageJunctions[stageIdx];
-  let deep = CONFIG.stageDeadEnds[stageIdx];
+  let J = base('junctions', 'stageJunctions');
+  let deep = base('deepArms', 'stageDeadEnds');
   if(notch >= 1 && stageIdx === 2) J += 1;
   if(notch >= 2 && stageIdx === 1) J += 1;
   if(notch >= 3 && stageIdx >= 1) deep += 1;
-  // extra junctions buy extra rows — T junctions need breathing room
-  const rows = CONFIG.mazeRows + 2*(J - CONFIG.stageJunctions[stageIdx]);
-  return { J, deep, chordShare: CONFIG.stageChordShare[stageIdx], rows };
+  J = Math.min(J, CONFIG.maxJunctionsPerStage);   // the ramp has a ceiling (§3.1)
+  // rows are the constraint and rows are the screen: junctions need roughly
+  // 1.75 rows each to place, so the budget scales with J rather than being fixed
+  const rows = Math.max(prof? prof.rows : CONFIG.mazeRows, CONFIG.rowBudgetBase + 2*J);
+  return {
+    J, deep, rows,
+    chordShare: base('chordShare', 'stageChordShare'),
+    doubleArmShare: (prof && prof.doubleArmShare)? prof.doubleArmShare[stageIdx] : 0,
+    cols: prof? prof.cols : CONFIG.mazeCols,
+  };
 }
 
 function speedWithNotch(base){
@@ -1329,7 +1388,7 @@ function generateHatStage(idx, dailySeedVal, params){
 }
 
 function hatStageFor(idx){
-  const gen = generateHatStage(idx, G.runSeed, effectiveGenParams(idx));
+  const gen = generateHatStage(idx, G.runSeed, effectiveGenParams(idx, 'hat'));
   if(gen) return { name:'Stage '+(idx+1), rows: gen.rows, generated:true,
                    landmarks: gen.landmarks, decor: gen.decor };
   return { name:'Stage '+(idx+1), rows: HAT_STAGES[idx].rows, generated:false,
@@ -1412,9 +1471,29 @@ const FOREST_SEED_SALT = 0x464F5245; // 'FORE' — the forest's own stream off t
 
 /* Forest stages are chord-only; otherwise the streak-notch ramp is shared. */
 function effectiveForestParams(idx){
-  const p = effectiveGenParams(idx);
+  const p = effectiveGenParams(idx, 'forest');
   p.chordShare = 1;   // the whole world hangs on this (§12)
+  p.doubleArmShare = 0; // an arm on both sides of the spine would break leg 2's
+                        // unambiguous which-arm memory — never in this world
+  // §12 gentle-start window: the Forest is reachable on night one, by a pair
+  // who may not have the colour vocabulary solid yet. For the first few days
+  // played, stages use their shortest spine and fewest arms whatever the
+  // streak says. A floor, never a ceiling — it can only make the Forest easier.
+  if(getDaysPlayed() < CONFIG.forestEasyUntilDays){
+    const prof = (CONFIG.genProfiles || {}).forest;
+    const easyJ = prof? prof.junctions[idx] : CONFIG.stageJunctions[idx];
+    const easyDeep = prof? prof.deepArms[idx] : CONFIG.stageDeadEnds[idx];
+    p.J = Math.min(p.J, easyJ);
+    p.deep = Math.min(p.deep, easyDeep);
+    p.rows = Math.max(prof? prof.rows : CONFIG.mazeRows, CONFIG.rowBudgetBase + 2*p.J);
+  }
   return p;
+}
+
+/* The rabbit's mercy hint on leg 2, halved inside the gentle-start window. */
+function forestHintBumps(){
+  const n = CONFIG.forestHintAfterBumps;
+  return getDaysPlayed() < CONFIG.forestEasyUntilDays? Math.max(1, Math.ceil(n/2)) : n;
 }
 
 /* Seat the cast on a generated chord-only maze: the arm tips (degree-1 open
@@ -1504,7 +1583,7 @@ function generateDeepStage(idx, dailySeedVal, params){
 }
 
 function deepStageFor(idx){
-  const gen = generateDeepStage(idx, G.runSeed, effectiveGenParams(idx));
+  const gen = generateDeepStage(idx, G.runSeed, effectiveGenParams(idx, 'deep'));
   if(gen) return { name:'Stage '+(idx+1), rows: gen.rows, generated:true, crab: gen.crab };
   // the never-broken floor: the shipped tunnel fixtures read fine as ocean corridors
   const fb = FALLBACK_STAGES[idx];
@@ -1910,7 +1989,7 @@ function deadEndBump(){
   // §12: wrong arms on the run back earn a gentle hint after a few tries
   if(WORLD().multiLeg && G.leg===2){
     G.leg2Bumps++;
-    if(G.leg2Bumps >= CONFIG.forestHintAfterBumps) G.hintRabbit = true;
+    if(G.leg2Bumps >= forestHintBumps()) G.hintRabbit = true;
   }
   bumpFX();
   G.phase = 'stunned';
