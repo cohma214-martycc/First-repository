@@ -4,13 +4,13 @@ A two-player asymmetric HTML5 game for one iPhone. The adult digs through underg
 
 This file is the source of truth for Claude Code. Build exactly to this spec unless a constraint is physically impossible — flag conflicts, don't silently redesign.
 
-**Changelog vs previous CLAUDE.md (this revision — NOT yet built, see §17):**
+**Changelog vs previous CLAUDE.md (this revision — BUILT, see §17):**
 - **Three worlds are unlocked from the very first boot.** Tunnels, The Hat and The Forest all sit on the rack in full colour on day one. Only **Deep Water** must be earned. The staged 5/10/15 ladder is retired. Rationale and consequences in §11.
 - **Deep Water is gated on continuous nights, not cumulative ones.** New currency: `tunnels:streakBest` — the longest unbroken run of nights the pair has ever managed. Monotonic (a broken streak never pushes the hat further away), so §11's "progress never goes backwards" principle survives intact. Default threshold **7**. `deepUnlockMode` flips back to cumulative days played if wanted.
 - **World One is substantially harder — and only World One.** Junctions per stage 2/4/6 → **4/6/8**, deep arms 1/2/3 → **3/5/7**, width 9 → **11 columns**, plus the real new branching lever: **double-armed crossings** (`doubleArmShare`), chord junctions that grow a dead arm on *both* sides. `digSpeed` rises to 1.3 to hold the run inside its 5–10 minute envelope. See §3.1 and §8.
-- **Generation parameters become per-world (`genProfiles`).** Today `effectiveGenParams()` is shared by all four worlds, so raising `stageJunctions` would silently harden the desert, the forest and the ocean too. The profile table isolates them. This is a prerequisite for the difficulty change, not an optional tidy-up.
+- **Generation parameters become per-world (`genProfiles`).** Before this revision `effectiveGenParams()` was shared by all four worlds, so raising `stageJunctions` would have silently hardened the desert, the forest and the ocean too. The profile table isolates them, and `effectiveGenParams(stageIdx, world)` now takes the world explicitly at every call site. This was a prerequisite for the difficulty change, not an optional tidy-up.
 - **Braided loops are NOT in this revision.** They stay a v3 item. The reason is in §3.1 — the current generator guarantees the screen-direction invariant by building a tree, and loops break that guarantee in a way that can put a junction in front of a horizontally-travelling digger, where green stops meaning screen-left.
-- **Picker simplification.** With three worlds lit at boot the picker is *always* the N-world stepper. The single-world branch (specced, never built) and the two-world direct green/red pick are both unreachable and are **cut**. The picker still opens at every boot.
+- **Picker simplification.** With three worlds lit at boot the picker is *always* the N-world stepper. The single-world branch and the two-world direct green/red pick are both unreachable — but they are **kept, not cut**: their conditions are duplicated across four call sites, so removing them means four coordinated edits for no behavioural gain, and they are the correct fallback if a future world ships locked. See §14.5. The picker still opens at every boot.
 - **The rack shows from the first run-complete card.** `rackShowsFromWorldTwo` is retired; the rack is visible everywhere it appears, from day one. Three hats and one silhouette is the picture on night one.
 - **The unlock ceremony now fires exactly once** in the life of the game — Deep Water, *"This one is not ours."*
 - Carried forward unchanged: the two-button input model, the screen-direction invariant, the chord, the bump economy, the shared streak/journal/seed, the homage rules, and the tone rules. **The plan trace stays cut.**
@@ -85,7 +85,7 @@ World One was the gentlest world in the game because it was the only one availab
 - **`stageChordShare` is left alone at `[0, 0.4, 0.5]`.** It already exists and is already tuned. Stage 1's zero is deliberate — the teaching stage stays green/red-only by construction — and raising stages 2 and 3 above 0.5 starts to make the spine monotonous. Do not touch it.
 - **Gems: 3, with an 0.8 dead-end bias.** More temptation off the path, so the detour conversation happens most stages.
 
-**Rows are the constraint, and rows are the screen.** The generator needs roughly `4 + 1.75 × J` rows to place its junctions, so junction count and grid height are the same dial. But `cs` (cell size) is `min(W/cols, (H − strips)/rows)`, so more rows means smaller cells — and on a phone the maze must stay legible to a pre-reader sitting beside an adult. At J=8 the row budget lands near 22, which is about a 26px cell on a modern iPhone. That is the floor. **Legibility, not the generator, is what caps this world's difficulty** — which is exactly why the branching comes from double-armed crossings and deeper arms rather than from ever-longer spines.
+**Rows are the constraint, and rows are the screen.** The generator needs roughly `4 + 1.75 × J` rows to place its junctions, so junction count and grid height are the same dial. But `cs` (cell size) is `min(W/cols, (H − strips)/rows)`, so more rows means smaller cells — and on a phone the maze must stay legible to a pre-reader sitting beside an adult. At J=8 the row budget lands on 22 rows and a **measured 26px cell** on a 390×844 iPhone. That is the floor. **Legibility, not the generator, is what caps this world's difficulty** — which is exactly why the branching comes from double-armed crossings and deeper arms rather than from ever-longer spines.
 
 Replace the fixed `mazeRows` with a per-stage budget: `rows = max(profile.rows, 6 + 2 × J)`. This also fixes a latent bug — `effectiveGenParams()` currently adds rows only for junctions the *streak ramp* added, not for a raised baseline, so raising `stageJunctions` alone would starve the generator and fall back to fixtures every day.
 
@@ -178,13 +178,17 @@ Inspired by the flat, deadpan, earth-toned cross-section style of *Sam and Dave 
 ### v2.7 — World Three: The Forest (built — see §12)
 ### v2.8 — World Four: Deep Water (built — see §13)
 
-### v2.9 — Open the rack, harden the tunnels (**this revision, not yet built — see §17**)
-- **Three worlds unlocked at boot.** Tunnels, The Hat, The Forest all available from the first session; Deep Water alone is earned.
-- **Deep Water gated on best-ever streak** (`streakBest`, default 7), with `deepUnlockMode:'days'` as the cumulative alternative.
-- **World One difficulty raised** (§3.1): junctions 4/6/8, deep arms 3/5/7, 11 columns, double-armed crossings, a per-stage row budget, `digSpeed` 1.3, `maxJunctionsPerStage` clamp.
-- **Generation parameters split per world** (`genProfiles`) so the raise touches Tunnels only.
-- **Picker reduced to the stepper only**; single-world and two-world branches cut.
-- **Rack visible everywhere from day one**; `rackShowsFromWorldTwo` retired.
+### v2.9 — Open the rack, harden the tunnels (built — see §17)
+- **(built)** **Three worlds unlocked at boot.** Tunnels, The Hat, The Forest all available from the first session; Deep Water alone is earned.
+- **(built)** **Deep Water gated on best-ever streak** (`streakBest`, default 7), with `deepUnlockMode:'days'` as the cumulative alternative. Both paths implemented.
+- **(built)** **World One difficulty raised** (§3.1): junctions 4/6/8, deep arms 3/5/7, 11 columns, double-armed crossings, a per-stage row budget, `digSpeed` 1.3, `maxJunctionsPerStage` clamp.
+- **(built)** **Generation parameters split per world** (`genProfiles`) so the raise touches Tunnels only.
+- **(built)** **Picker is the stepper in practice**; the single-world and two-world branches are kept as a guard (§14.5), not cut.
+- **(built)** **Rack visible everywhere from day one**; `rackShowsFromWorldTwo` retired.
+- **(built)** **The Forest's gentle-start window** (`forestEasyUntilDays`, §12) — specified in §12 but absent from §17's build order, so noted here explicitly.
+- **(built, unplanned)** **`appendJournal()` sealed in playtest.** It wrote straight to `localStorage`, bypassing `shouldPersist()`, so playtest runs stamped real journal entries against §11.5. A pre-existing bug, found by the §17.29 check.
+
+**Measured on build (390×844 viewport, fresh save):** generated-stage fallback rate 0% for all four worlds; the other three worlds' junction counts unchanged at 2/4/6 (the §17.27 leak test); stage-3 cell size **26 px** at 11×22 — the legibility floor §3.1 predicts; all four worlds complete a three-stage run. Pure travel time for a Tunnels run is 1.3 min and derived par is **4.9 min**, so the §2 envelope depends on real deliberation and still wants a session on the actual phone (§16.3).
 
 ### v3 — Deepen the learning
 - Map mode and Memory mode stages (Navigator information scaling, §3) — across the worlds.
@@ -384,7 +388,7 @@ The rack was built as a four-rung ladder — a hat every five days — because T
 Consequences, all of them deliberate:
 - The rack shows **three hats and one silhouette** from the very first boot. That is a different, better first impression than one hat and three silhouettes: it reads as a collection with a gap, not a locked door.
 - The **unlock ceremony fires exactly once** in the life of the game. It should therefore be the best one — Deep Water's, unchanged: *"This one is not ours."*
-- The **first-appearance backfill** logic (the day-5 run that swung the rack into view and landed two hats at once) is dead. Delete it.
+- The **first-appearance backfill** logic (the day-5 run that swung the rack into view and landed two hats at once) is dead, and has been deleted.
 - The **pip count is the whole progression**, so it shows early: `rackPipThreshold` rises 7 → 10, meaning the moons are countable from essentially the first run.
 
 ### 11.2 The currency
@@ -406,7 +410,7 @@ Migration on first load after this update: `streakBest = max(existing streakBest
 | 3 | The Forest | red pointy hat | **from the start** |
 | 4 | Deep Water | small blue bowler | **best-ever streak of 7 nights** (`deepUnlockMode:'streak'`, `deepUnlockStreak:7`) |
 
-`deepUnlockMode:'days'` switches peg 4 to `deepUnlockDays` (10) cumulative days played instead. Both paths must be implemented; the mode is a one-line CONFIG flip after playtest.
+`deepUnlockMode:'days'` switches peg 4 to `deepUnlockDays` (10) cumulative days played instead. Both paths are implemented and both are tested at their boundaries; the mode is a one-line CONFIG flip after playtest.
 
 **Counting copy for the moons under peg 4** must stay in the §10 tone — it states what is true now, never what was missed:
 - streak mode: *"three more nights in a row"* → as moons, no number needed.
@@ -451,7 +455,7 @@ Homage in spirit to *I Want My Hat Back*. All original assets. **Rung six: route
 
 **NEW this revision — the gentle-start window.** The Forest is now reachable on night one, by a pair who may not yet have the colour vocabulary solid. For the first `forestEasyUntilDays` (3) days played, Forest stages use their **shortest spine and fewest arms** regardless of streak, and `forestHintAfterBumps` is halved. After that window the normal ramp applies. This is a floor, not a ceiling — it never makes the Forest harder, only guarantees a survivable first encounter.
 
-**The load-bearing constraint:** Forest stages are **chord-only**. `effectiveForestParams()` sets `chordShare = 1` on top of the shared params today; under `genProfiles` (§8) the Forest profile carries `chordShare:[1,1,1]` and `doubleArmShare:[0,0,0]` — a double-armed crossing in the Forest would put an arm on both sides of the spine and break the return leg's unambiguous which-arm memory, so it must stay zero there. A chord junction leaves vertically, so the return enters vertically and the calls stay exactly chord / green / red in both legs — green is still screen-left, the world never flips. Leg 2 needs no new maze: start = deer cell heading up, exit = rabbit's arm.
+**The load-bearing constraint:** Forest stages are **chord-only**. The Forest profile carries `chordShare:[1,1,1]` and `doubleArmShare:[0,0,0]`, and `effectiveForestParams()` additionally pins both on top of the profile — belt and braces, because a double-armed crossing in the Forest would put an arm on both sides of the spine and break the return leg's unambiguous which-arm memory. It must stay zero there. A chord junction leaves vertically, so the return enters vertically and the calls stay exactly chord / green / red in both legs — green is still screen-left, the world never flips. Leg 2 needs no new maze: start = deer cell heading up, exit = rabbit's arm.
 
 **Meeting an animal** is a conversation, not a bump: the bear stops, a bubble holds for `speakerLineMs`, a soft chime marks it, then a **polite turnaround** back to the junction — no bonk, no shake, **no bump counted**. Bare arms still bump (trees aren't conversational). Bubbles are **pictograms** (`forestSpeechMode:'pictures'`, a `'words'` toggle gives NO/OK): most animals a slashed hat, the asker a hat outline with a "?", **the rabbit three slashed hats crammed in** (protesting far too much), the sleeper a "z". **The deer beat** shows an empty hat outline; the bear's bubble fills the same shape red — two identical silhouettes, the whole story in shape and colour — then the red page. **The silent joke:** one animal is always asleep and never answers.
 
@@ -502,20 +506,22 @@ The rack *is* the picker, and it opens at every boot. `pickerAlwaysAtBoot` alrea
 
 **Leave the other two branches in place.** An earlier draft of this spec said to delete them. That was wrong on inspection: the branch conditions are duplicated across four call sites (`renderPicker`, `press()`, the picker case in `update()`, and the `keydown` handler), so removing them means four coordinated edits for no behavioural gain, and they are the correct fallback if a future world ever ships locked or if `genProfiles`/`worldUnlockDays` is edited in the dev panel. Dead but load-bearing as a guard.
 
-**Default highlight:** `showPicker()` currently seeds `G.pickerIdx` from `LS.get('lastWorld')`. Add one condition — when `getDaysPlayed() === 0`, start on Tunnels regardless. On the first night, three lit hats is an invitation; landing the highlight on Tunnels is the quiet suggestion of where to start.
+**Default highlight (built):** `showPicker()` seeds `G.pickerIdx` from `LS.get('lastWorld')`, except when `getDaysPlayed() === 0`, where it starts on Tunnels regardless. On the first night, three lit hats is an invitation; landing the highlight on Tunnels is the quiet suggestion of where to start. Verified on a fresh save (§17.6, item 25) and on a migrated save, where `lastWorld` is honoured again.
 
 **No new touch targets, in any case.** The two buttons and the chord do everything. The rack's `.pegHit` areas remain the only exception, and only outside play.
 
 ## 15. CONFIG
 
-All keys are in §8. Existing rule stands: **no magic numbers in gameplay code** — `generateStageRows()`'s hard-coded `attempt<120` and `tryCarve()`'s arm lengths are the two current violations, and `genAttempts` fixes the first.
+All keys are in §8. Existing rule stands: **no magic numbers in gameplay code**. `generateStageRows()`'s hard-coded `attempt<120` is now `CONFIG.genAttempts`; **`tryCarve()`'s arm lengths remain the one live violation** — the `2 + (rnd()<0.4?1:0)` deep-arm length, the `1` stub length, and `doT()`'s `2 + floor(rnd()*2)` route length are all still literals. Worth extracting the next time this generator is opened.
 
-Keys removed this revision (`hatUnlockRuns`, `rackShowsFromWorldTwo`) must be deleted from `CONFIG_DEFAULTS` *and* from every read site — no orphaned flags. Note `hatUnlockRuns` is already dead: it appears in `CONFIG_DEFAULTS` and nowhere else.
+Keys removed this revision (`hatUnlockRuns`, `rackShowsFromWorldTwo`) are gone from `CONFIG_DEFAULTS` and from every read site — verified by grep (§17.6, item 31). No key was added beyond §8's table.
+
+One parse fix was needed to honour §8's "every value overridable by URL param": the override loop parsed `[` but not `{`, so `genProfiles` and `worldUnlockDays` could not be set from the URL. It now accepts both, matching the dev panel, which already did.
 
 ## 16. Open — playtest tuning (not code to write)
 
 One-line CONFIG changes after a real session, not features to build:
-1. **World One junction counts.** 4/6/8 is a judgement, not a measurement. Watch stage 3 on the actual phone — at J=8 the row budget puts the cell near 26px, and if the digger and dog look cramped, 4/6/7 before anything else.
+1. **World One junction counts.** 4/6/8 is a judgement, not a measurement. Watch stage 3 on the actual phone — at J=8 the row budget gives a **22-row grid and a measured 26px cell** on a 390×844 screen, right on the legibility floor. If the digger and dog look cramped, 4/6/7 before anything else.
 2. **`doubleArmShare` 0/0.30/0.45.** The branchiness dial, and the one to move first if the maze feels too easy or too mean. It costs no rows either way.
 3. **`digSpeed` 1.3.** Time a full run. Target 5–10 minutes. If it runs long, the speed goes up before the junctions come down; if the Driver feels rushed between junctions, the junctions come down instead.
 4. **`stageDeadEnds` 3/5/7.** Deep arms are the cheapest difficulty in the file. If bumps start feeling punishing rather than funny, this comes down before the junction count does.
@@ -527,9 +533,16 @@ One-line CONFIG changes after a real session, not features to build:
 
 ---
 
-## 17. Build order for Claude Code (this revision)
+## 17. Build order for Claude Code (this revision — **BUILT**, kept as the record)
 
 The whole game is one self-contained `index.html`. Work in this order; after each numbered block the game must still boot and complete a run, with no half-migrated saves. Function names below are the real ones in the file.
+
+**This build order has been carried out in full and every check in §17.5 passes.** It is kept as written, in the imperative, because it is the clearest account of *why* each edit is shaped the way it is — the reasoning in 17.20, 17.21 and 17.23 in particular is load-bearing for anyone touching the generator or the validator again. Two deviations from the numbered list, both deliberate and both recorded in §6:
+
+- **`forestEasyUntilDays`** is specified in §12 as part of this revision but appears nowhere in 17.1–17.5. It was built (`effectiveForestParams()` clamps J and deep arms to the profile baseline inside the window; `forestHintBumps()` halves the rabbit hint).
+- **`appendJournal()` was sealed behind `shouldPersist()`.** Not in the build order — the §17.29 check found it writing to `localStorage` directly, so a playtest run stamped a real journal entry against §11.5.
+
+Item 5's migration reads "longest run of consecutive `day` values in the journal". It is implemented by replaying `advanceStreak()` over the journal's distinct days rather than by counting strict adjacency, because `advanceStreak()` forgives a single missed day (`today - lastDay <= 2`) — strict consecutiveness would reconstruct a *lower* streak than the live counter had actually awarded, and charge a pair twice for nights they already earned.
 
 ### 17.1 Unlock three worlds
 1. `CONFIG_DEFAULTS.worldUnlockDays` → `{ tunnels:0, hat:0, forest:0, deep:0 }`. Add `deepUnlockMode: 'streak'`, `deepUnlockStreak: 7`, `deepUnlockDays: 10`.
@@ -576,3 +589,23 @@ The whole game is one self-contained `index.html`. Work in this order; after eac
 31. Grep for `hatUnlockRuns` and `rackShowsFromWorldTwo` — zero hits.
 
 **Flag, don't redesign.** If any step conflicts with the invariants in §1, §3 or §9 — particularly the vertical-junction rule — stop and say so rather than working around it.
+
+### 17.6 Results of that verification (recorded on build)
+
+| # | Result |
+|---|---|
+| 25 | Fresh save boots to three coloured hats, one silhouette, **7 moons** under peg 4, highlight on Tunnels. |
+| 26 | Fallback rate **0%** for all three Tunnels stages (50 seeds in-page, 200 in node). The row budget is right. |
+| 27 | Hat, Forest and Deep all still generate **2/4/6** junctions. No leak. |
+| 28 | Grids 11×14 / 11×18 / 11×22; **stage-3 cell 26 px** on a 390×844 viewport — exactly the floor §3.1 predicts. Travel time with instant presses 1.3 min; derived par **4.9 min**. See the caveat below. |
+| 29 | `?unlockAll=1` unlocks all four and a full run writes **zero** keys (after the `appendJournal()` fix). |
+| 30 | A pre-update save keeps days, streak, bests, runs and all journal entries; `streakBest` reconstructs to 5 from a historical 5-night run; hats go 2 → 3, never fewer. |
+| 31 | Zero hits for both removed keys. |
+| 23 | 2400 generated mazes across all four worlds were solved by replaying `solveMaze()`'s press list through the real junction logic — **865 degree-4 crossings traversed**, no maze failed, and no junction was ever entered while travelling horizontally. |
+| 24 | Fixtures untouched and still valid under the degree-4-aware validator. |
+| — | All four worlds complete a three-stage run: 76 / 85 / 89 / 83 s. |
+| — | The ceremony fires once, on the 7th continuous night, highlighting `deep`. A later broken streak keeps the hat, shows no moons, and says nothing about the break. |
+
+**The one thing a machine cannot check is item 28.** An automated driver presses instantly, so 1.3 min is the pure travel floor, not a run. Par — travel × `parSlack` + `junctionThinkMs` per junction — is 4.9 min, and a pair actually talking through 18 junctions plus a few bumps lands inside the §2 envelope. **Time a real session before touching `digSpeed`** (§16.3); the measurement above is a floor, not a verdict.
+
+**One side effect of the row budget worth knowing.** `rows = max(profile.rows, rowBudgetBase + 2J)` is applied to every world, so the other three go from a flat 12 rows to 12/14/18. Their junction counts are unchanged (item 27), but their stage-2 and stage-3 mazes are taller than before and their stage-3 fallback rate drops from 0.5% to 0%. That is the latent bug §3.1 names, fixed — and it means their daily mazes differ from the ones the same seed produced yesterday.
