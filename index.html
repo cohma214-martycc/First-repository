@@ -2213,6 +2213,9 @@ function appendJournal(entry){
   if(!Array.isArray(journal)) journal = [];
   journal.push(entry);
   while(journal.length > 200) journal.shift();       // keep the last ~200 days
+  // §11.5: playtest is sealed from the real save. The card still shows the
+  // stamp it would have made — reads stay truthful — but nothing is written.
+  if(!shouldPersist()) return journal;
   while(journal.length){                              // trim oldest until it fits
     try{ localStorage.setItem('tunnels:journal', JSON.stringify(journal)); break; }
     catch(e){ journal.shift(); }
