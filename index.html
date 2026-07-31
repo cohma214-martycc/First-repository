@@ -178,7 +178,6 @@ const CONFIG_DEFAULTS = {
   // overworld generation (v2.5+)
   landmarkCount: 4,         // nameable landmarks per Hat stage
   landmarkJunctionRadius: 1,// every junction within this many tiles of a landmark
-  hatUnlockRuns: 5,         // completed tunnel runs before World Two appears
   // difficulty ramp (v2)
   streakDifficultyStep: 3,
   streakDifficultyCap: 14,
@@ -201,10 +200,13 @@ const CONFIG_DEFAULTS = {
   showLiveDigger: true,
   positionUpdateAtJunctionsOnly: false,
   lineOfSight: false,       // Watcher sees only what's visible from the rock (v3, World Two)
-  // progression & the rack (§11) — days played, not runs, is the currency
-  worldUnlockDays: { tunnels:0, hat:5, forest:10, deep:15 },
-  rackPipThreshold: 7,      // show countable sleeps when this few remain
-  rackShowsFromWorldTwo: true, // no rack until the desert (5 days) is reached
+  // progression & the rack (§11) — three worlds open at boot; Deep Water alone
+  // is earned, and its currency is the best-ever unbroken run of nights.
+  worldUnlockDays: { tunnels:0, hat:0, forest:0, deep:0 },
+  deepUnlockMode: 'streak', // 'streak' (best-ever unbroken nights) | 'days' (cumulative)
+  deepUnlockStreak: 7,      // best-ever streak required when deepUnlockMode === 'streak'
+  deepUnlockDays: 10,       // cumulative days required when deepUnlockMode === 'days'
+  rackPipThreshold: 10,     // show countable nights when this few remain
   pickerAlwaysAtBoot: true, // the picker opens every session, even with 1 hat unlocked
   rackEnabled: true,
   // the golden night (§11) — bump-free AND under par, once per calendar day
@@ -718,10 +720,14 @@ function speedWithNotch(base){
 }
 
 /* ---------------- Progression & the hat rack (§11) ------------------------
-   The currency is DAYS PLAYED — distinct calendar days a run was completed,
-   cumulative, monotonic, shared across all worlds. It never goes backwards
-   and never mentions a day that wasn't played. It replaces the invisible
-   hatUnlockRuns gate: worlds unlock at day thresholds, not run counts.     */
+   Two currencies, both monotonic, both shared across all four worlds, and
+   neither ever goes backwards or mentions a day that wasn't played.
+   DAYS PLAYED — distinct calendar days a run was completed. It drives the
+   "Day N of digging together" line, the Forest's gentle-start window and the
+   journal, and gates nothing unless deepUnlockMode is flipped to 'days'.
+   STREAK BEST — the longest unbroken run of nights ever managed. It is the
+   one gate left in the game: three worlds are lit from the first boot, and
+   Deep Water alone is earned (§11.1).                                       */
 
 /* Playtest mode (Marty only): sealed from the real save. Three doors open
    it — the URL param, the dev panel, the 4-3-2-1 rack gesture. While on, no
@@ -748,20 +754,49 @@ function getDaysPlayed(){
   return new Set((Array.isArray(j)? j : []).map(e=> e.day)).size;
 }
 
+/* Best-ever streak: the longest unbroken run of nights the pair has ever
+   managed (§11.2). Monotonic by construction — it is written as a max, so a
+   broken streak never pushes the last hat further away. On first read after
+   this update it migrates from the journal by replaying advanceStreak over
+   the distinct days it stamped: the same rule the live counter uses, so a run
+   of nights already earned is never charged for twice. Never returns less
+   than the stored value.                                                    */
+function getStreakBest(){
+  const live = currentStreak().count || 0;
+  const stored = LS.get('streakBest', null);
+  if(stored !== null) return Math.max(stored, live);
+  const j = LS.get('journal', []);
+  const days = Array.from(new Set((Array.isArray(j)? j : [])
+                 .map(e=> e.day).filter(d=> typeof d === 'number')))
+               .sort((a,b)=> a-b);
+  let s = { count:0, lastDay:null, notch:0 }, best = 0;
+  for(const d of days){ s = advanceStreak(s, d); best = Math.max(best, s.count); }
+  return Math.max(best, live);
+}
+
 function worldUnlockDay(world){
   const t = CONFIG.worldUnlockDays || {};
   return (t[world] !== undefined)? t[world] : 0;
 }
+
+/* Is Deep Water earned, given a {days, streakBest} pair? Pure, so the same
+   rule serves the live check and the before/after ceremony test (§17.2).    */
+function deepUnlockedBy(state){
+  return CONFIG.deepUnlockMode === 'streak'
+    ? state.streakBest >= CONFIG.deepUnlockStreak
+    : state.days >= CONFIG.deepUnlockDays;
+}
+
+/* Three worlds are lit from the very first boot (§11.3); Deep Water alone is
+   earned. A pure read — buildRackSVG() calls it on every render.            */
 function isUnlocked(world){
   if(playtest) return true;                 // every peg holds its hat in playtest
-  return getDaysPlayed() >= worldUnlockDay(world);
+  if(world !== 'deep') return true;
+  return deepUnlockedBy({ days: getDaysPlayed(), streakBest: getStreakBest() });
 }
-/* The rack itself doesn't exist until World Two is reached (§11). */
+/* The rack is visible everywhere it appears, from day one (§11.5). */
 function rackVisible(){
-  if(!CONFIG.rackEnabled) return false;
-  if(playtest) return true;
-  if(!CONFIG.rackShowsFromWorldTwo) return true;
-  return getDaysPlayed() >= worldUnlockDay('hat');
+  return !!CONFIG.rackEnabled;
 }
 
 /* Advance the currency on a completed run. A day played is worth one night;
@@ -805,12 +840,16 @@ function stageParMs(maze, effectiveSpeed){
        + junctionCount * CONFIG.junctionThinkMs;
 }
 
-/* Which worlds crossed their unlock threshold on this run (prev→now days).
-   Drives the unlock ceremony; empty on an ordinary run.                    */
-function newlyUnlocked(prevDays, nowDays){
+/* Which worlds crossed their unlock threshold on this run. Both arguments are
+   {days, streakBest} snapshots taken either side of the run's writes. Drives
+   the unlock ceremony, which now fires exactly once in the life of the game —
+   Deep Water. The three free worlds sit at threshold 0, so the day test below
+   returns nothing for them and a brand-new player gets no spurious ceremony. */
+function newlyUnlocked(before, after){
   return RACK_PEGS.filter(p=>{
+    if(p.world === 'deep') return !deepUnlockedBy(before) && deepUnlockedBy(after);
     const d = worldUnlockDay(p.world);
-    return d > prevDays && d <= nowDays;
+    return d > before.days && d <= after.days;
   }).map(p=> p.world);
 }
 
@@ -1960,7 +1999,11 @@ function finishRun(){
   const runs = (LS.get('runs', 0)) + 1;
   if(shouldPersist()) LS.set('runs', runs);
   const streak = advanceStreak(currentStreak(), dayNumber());
+  const prevStreakBest = getStreakBest();  // captured before the write — the ceremony needs the pair
   if(shouldPersist()) LS.set('streak', streak);
+  // §11.2: the last hat's currency. Written as a max, so it only ever grows.
+  const streakBest = Math.max(prevStreakBest, streak.count);
+  if(shouldPersist()) LS.set('streakBest', streakBest);
   const stamp = stampJournal(tot, streak); // one keepsake per completed run (sealed in playtest)
 
   // §11: the golden night — bump-free AND under par (par is time underground,
@@ -1994,18 +2037,15 @@ function finishRun(){
     '<br>Runs together: '+runs+'</p>'+
     '<p class="hint">Hold both buttons together to dig again</p>';
 
-  // §11: an unlock ceremony precedes the stats when a peg is newly earned.
-  // Sealed playtest never runs it (everything is already unlocked).
-  const unlocked = playtest? [] : newlyUnlocked(prog.prev, prog.now);
+  // §11: the unlock ceremony precedes the stats when the last peg is earned.
+  // With three worlds lit at boot this fires exactly once in the life of the
+  // game — Deep Water. Sealed playtest never runs it (all four are unlocked).
+  const unlocked = playtest? [] : newlyUnlocked(
+    { days: prog.prev, streakBest: prevStreakBest },
+    { days: prog.now,  streakBest: streakBest });
   if(CONFIG.rackEnabled && unlocked.length){
-    const firstRack = CONFIG.rackShowsFromWorldTwo
-      && prog.prev < worldUnlockDay('hat') && prog.now >= worldUnlockDay('hat');
-    // the rack's own arrival backfills pegs 1 & 2 together
-    const highlight = firstRack ? ['tunnels','hat'] : unlocked;
-    const last = unlocked[unlocked.length-1];
-    const sub = last==='deep'? 'This one is not ours.'
-              : last==='forest'? 'Somebody has lost this one.'
-              : 'The rack begins.';
+    const highlight = unlocked;
+    const sub = 'This one is not ours.';
     G.rcPhase = 'ceremony';
     G.rcRack = { statsHtml, golden: awardedGold };
     showPanel(
@@ -3651,7 +3691,7 @@ function drawDebug(){
   ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
   ctx.fillText('phase: '+G.phase+'  cell: '+key(G.cell)+'  hdg: '+G.heading.dx+','+G.heading.dy, 8, H-8);
   ctx.fillText('seed: '+G.runSeed+'  '+(G.maze.generated? 'generated':'FALLBACK'), 8, H-20);
-  ctx.fillText('days: '+getDaysPlayed()+(playtest? '  PLAYTEST' : ''), 8, H-32);
+  ctx.fillText('days: '+getDaysPlayed()+'  streakBest: '+getStreakBest()+(playtest? '  PLAYTEST' : ''), 8, H-32);
 }
 
 /* ---------------- HUD & panels ------------------------------------------- */
@@ -3754,9 +3794,17 @@ function buildRackSVG(opts){
       svg += crescentSVG(px+0.42*s, baseY-0.52*s, 5, 'rgba(201,160,52,0.9)', '#8E6F42');
     }
   });
-  // countable sleeps under the next locked peg — small moons, one per night
+  // countable nights under the next locked peg — small moons, one per night.
+  // Deep Water is the only peg that can be locked, and its count is mode-aware
+  // (§11.3): nights in a row still to string together, or sleeps still to come.
+  // It states what is true now and never mentions a count that was lost.
   if(nextIdx>=0){
-    const remaining = worldUnlockDay(RACK_PEGS[nextIdx].world) - days;
+    const p = RACK_PEGS[nextIdx];
+    const remaining = Math.max(0, p.world==='deep'
+      ? (CONFIG.deepUnlockMode==='streak'
+          ? CONFIG.deepUnlockStreak - getStreakBest()
+          : CONFIG.deepUnlockDays - days)
+      : worldUnlockDay(p.world) - days);
     if(remaining>0 && remaining <= CONFIG.rackPipThreshold){
       const px = xs[nextIdx];
       const gap = 11, y = 116;
@@ -3821,13 +3869,14 @@ function onRackPeg(idx){
     else mountRacks();
   }
 }
-/* World picker — the rack IS the picker (§11, §14.5). Two worlds keep the
-   original direct choice (green = the left peg, red = the right, chord = same
-   as last time — the buttons teach themselves). Three or more unlocked worlds
-   switch to the N-world picker: green steps left along the rack, red steps
-   right, the chord goes there. Locked pegs are skipped, never selectable, and
-   the stepping teaches the chord to anyone who forgot it. No new touch
-   targets either way. Exists only once the ritual has earned it.           */
+/* World picker — the rack IS the picker (§11, §14.5), and it opens at every
+   boot. With three worlds lit from day one the N-world stepper is the only
+   branch actually reachable: green steps left along the rack, red steps right,
+   the chord goes there, locked pegs are skipped. The single-world and
+   two-world branches below stay as a guard — their conditions are duplicated
+   across four call sites, and they are the correct fallback if a future world
+   ever ships locked or worldUnlockDays is edited in the dev panel. No new
+   touch targets in any case.                                               */
 function showPicker(){
   G.phase = 'picker';
   G.pendingSide = null; G.pendingMs = 0;
@@ -3836,7 +3885,9 @@ function showPicker(){
   // exists, and must never be steppable to (WORLDS.deep is undefined until §13)
   G.pickerWorlds = RACK_PEGS.filter(p=> isUnlocked(p.world) && WORLDS[p.world]).map(p=> p.world);
   if(!G.pickerWorlds.length) G.pickerWorlds = ['tunnels'];
-  const last = LS.get('lastWorld', 'tunnels');
+  // §14.5: on the very first night three lit hats are an invitation — landing
+  // the highlight on Tunnels is the quiet suggestion of where to start.
+  const last = getDaysPlayed()===0? 'tunnels' : LS.get('lastWorld', 'tunnels');
   let i = G.pickerWorlds.indexOf(last); if(i<0) i = 0;
   G.pickerIdx = i;
   renderPicker();
@@ -3848,10 +3899,9 @@ function renderPicker(){
   const stepping = G.pickerWorlds.length > 2;
   const single = G.pickerWorlds.length === 1;
   const sel = G.pickerWorlds[G.pickerIdx];
-  // §11/§14.5: the picker's rack ignores the run-complete card's day-5 gate
-  // entirely — it always renders (subject only to the master rackEnabled
-  // switch) when pickerAlwaysAtBoot is on. One lit peg with silhouettes
-  // waiting is the whole suspense from the very first session.
+  // §11.5: the rack renders everywhere it appears, from day one — three hats
+  // and one silhouette is the picture on night one. It reads as a collection
+  // with a gap, not a locked door.
   const rackShown = CONFIG.rackEnabled && (CONFIG.pickerAlwaysAtBoot || rackVisible());
   const rack = rackShown? '<div class="rackHost" data-select="'+sel+'"></div>' : '';
   if(single){
@@ -4108,7 +4158,8 @@ window.TUNNELS = { G, CONFIG, FALLBACK_STAGES, HAT_STAGES, WORLDS, setupStage,
   advanceStreak, currentStreak, effectiveGenParams, dayNumber,
   appendJournal, dateStamp, topDownHat,
   // §11 — the hat rack, days played, par & the golden night, playtest
-  getDaysPlayed, worldUnlockDay, isUnlocked, rackVisible, updateProgression,
+  getDaysPlayed, getStreakBest, deepUnlockedBy, worldUnlockDay, isUnlocked,
+  rackVisible, updateProgression,
   stageParMs, newlyUnlocked, buildRackSVG, RACK_PEGS,
   setPlaytest, get playtest(){ return playtest; },
   // §12 — World Three: the forest, its cast, and the multi-leg pieces
